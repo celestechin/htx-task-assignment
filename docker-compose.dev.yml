@@ -1,0 +1,9 @@
+# for local development only: opens postgres on localhost:5432
+# so the backend can run outside docker with `npm run dev`
+# kept out of the main file in case a reviewer already has postgres on 5432
+# use it together with the main file:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
+services:
+  db:
+    ports:
+      - "5432:5432"

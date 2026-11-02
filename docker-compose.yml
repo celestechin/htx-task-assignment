@@ -5,8 +5,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: task_assignment
-    ports:
-      - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -14,6 +12,37 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  backend:
+    build: ./backend
+    # lets the api stop straight away on docker compose down
+    init: true
+    # GEMINI_API_KEY (and optionally GEMINI_MODEL) come from backend/.env
+    # required: false so the app still starts without a key, tasks just show "not identified"
+    env_file:
+      - path: ./backend/.env
+        required: false
+    # these win over backend/.env, which points at localhost for running outside docker
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/task_assignment
+      PORT: "3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "${APP_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
 
 volumes:
   db_data:
