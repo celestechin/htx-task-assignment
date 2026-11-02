@@ -5,7 +5,9 @@ to developers who actually have the skills for them. If you create a task withou
 skills, the backend asks Google Gemini to work them out from the title.
 
 I started by working through every deliverable and the frameworks involved, and built the base
-requirements first. The part I enjoyed most was the LLM work. It was my first time building with one,
+requirements first. After that I went back and worked on the user experience, so the finished
+app looks quite different from the wireframes, with a few features I think a task assignment
+app needs. The part I enjoyed most was the LLM work. It was my first time building with one,
 and it's a skill I can already see myself using in other projects.
 
 - **Frontend:** TypeScript, React, Vite, TanStack Query, Tailwind CSS
@@ -23,26 +25,28 @@ and it's a skill I can already see myself using in other projects.
 - [Database design](#database-design)
 - [API](#api)
 - [Business rules](#business-rules)
-- [LLM skill identification](#llm-skill-identification)
+- [How the LLM part works](#how-the-llm-part-works)
 - [Testing](#testing)
-- [Local development without Docker](#local-development-without-docker)
-- [Libraries and why they were chosen](#libraries-and-why-they-were-chosen)
+- [Running it without Docker](#running-it-without-docker)
+- [Libraries I used and why](#libraries-i-used-and-why)
 - [Assumptions](#assumptions)
 - [Requirements coverage](#requirements-coverage)
+- [Extras beyond the brief](#extras-beyond-the-brief)
+- [What I'd do next](#what-id-do-next)
 - [Project structure](#project-structure)
 
 ## Quick start
 
-You need [Docker Desktop](https://www.docker.com/products/docker-desktop/), or Docker Engine
+You'll need [Docker Desktop](https://www.docker.com/products/docker-desktop/), or Docker Engine
 with the Compose plugin v2.24 or newer (`docker compose version` shows it).
 
-1. Add your Gemini API key:
+1. Add the Gemini API key (I've sent it by email):
 
    ```bash
    cp backend/.env.example backend/.env
    ```
 
-   Open `backend/.env` and paste the key after `GEMINI_API_KEY=`.
+   Then open `backend/.env` and paste the key after `GEMINI_API_KEY=`.
 
 2. Build and start everything:
 
@@ -76,14 +80,24 @@ Inside Docker, `DATABASE_URL` and `PORT` are set by `docker-compose.yml` and ove
 
 ## Using the app
 
-- **Tasks** (`/`) lists every task with its skills, status and assignee. Subtasks are indented
-  under their parent. Status and assignee are changed straight from the dropdowns. The assignee
-  dropdown only offers developers who have **every** skill the task requires. Changing the
-  status of an unassigned task shows a popup asking you to assign it first.
-- **Create Task** (`/tasks/new`) has a form for a task. **+ Add subtask under 1** adds a nested
-  subtask form below it, which can have subtasks of its own (numbered 1.1, 1.1.1, ...). Leave
-  the skill checkboxes empty to let the LLM pick the skills. The Save button says how many tasks
-  it will save, and the whole tree is saved together.
+- **Tasks** (`/`) shows each task as a card, with its subtasks nested inside. On each card:
+  - **Priority pill** (High, Medium, Low), colour-coded with a flag icon. Click it to change it.
+  - **Skills.** Skills chosen by Gemini have a ✨ sparkle.
+  - **Due date pill.** Click it to pick a date. It turns amber when due within 2 days, red when
+    overdue, and grey once the task is Done.
+  - **Status dropdown.** Changing the status of an unassigned task shows a popup asking you to
+    assign it first.
+  - **Assignee avatar** with the developer's initials. Hover over it to see their full name and
+    skills; click it to pick from the developers who have **every** skill the task requires.
+  - **Progress bar** on tasks with subtasks, counting Done subtasks at every level.
+  - **⋯ menu** to edit (title, skills, priority, due date) or delete the task. Deleting asks for
+    confirmation and also deletes its subtasks.
+- **Search and quick filters** above the list: search titles, and toggle status, priority,
+  Unassigned, Overdue and Due soon. A parent stays visible (faded) when only its subtasks match.
+- **Create Task** (`/tasks/new`) has a form for a task, including priority and due date.
+  **+ Add subtask under 1** adds a nested subtask form below it, which can have subtasks of its
+  own (numbered 1.1, 1.1.1, ...). Leave the skill checkboxes empty to let the LLM pick the
+  skills. The Save button says how many tasks it will save, and the whole tree is saved together.
 
 The seed data adds the developers and skills from the requirements, plus the three example tasks
 from the wireframe so the list is not empty on first start.
@@ -105,40 +119,49 @@ flowchart LR
     API -->|"HTTPS, only for tasks without skills"| Gemini["Google Gemini API"]
 ```
 
-- **frontend:** nginx serves the built React single-page app and forwards `/api/*` to the
-  backend. Because the browser only talks to one address, no CORS setup is needed.
-- **backend:** an Express API. On start it applies database migrations and runs the seed (both
-  are safe to repeat), then serves requests.
-- **db:** PostgreSQL 17 with a named volume for its data.
+There are three containers:
 
-Containers start in order using health checks: the API waits for the database to accept
-connections, and nginx waits for the API's `/health` endpoint.
+- **frontend:** nginx serves the built React app and passes anything under `/api/` on to the
+  backend. Since the browser only ever talks to one address, I didn't need to set up CORS.
+- **backend:** the Express API. Every time it starts, it runs the database migrations and the
+  seed (both are safe to repeat) before it starts taking requests.
+- **db:** PostgreSQL 17, with a named volume for the data.
+
+They start in order using health checks: the API waits until the database accepts connections,
+and nginx waits until the API's `/health` endpoint answers.
 
 ### Backend layers
 
-| Layer | Folder | Responsibility |
-|---|---|---|
-| Routes | `backend/src/routes` | HTTP only: read the request, validate it with Zod, call a service, send the response |
-| Services | `backend/src/services` | Business rules and SQL |
-| LLM client | `backend/src/llm` | The call to Gemini |
-| Error handler | `backend/src/middleware` | Turns every error into the same JSON format |
+I kept the backend in a few simple layers so each file has one job:
 
-SQL is written by hand with parameterised queries (`$1`, `$2`, ...), which keeps the queries
-visible and prevents SQL injection.
+| Layer | Folder | What it does |
+|---|---|---|
+| Routes | `backend/src/routes` | HTTP only: read the request, check it with Zod, call a service, send the response |
+| Services | `backend/src/services` | The business rules and all the SQL |
+| LLM client | `backend/src/llm` | The call to Gemini |
+| Error handler | `backend/src/middleware` | Turns every error into the same JSON shape |
+
+I wrote the SQL by hand with parameterised queries (`$1`, `$2`, ...). It keeps the queries easy
+to read and protects against SQL injection.
 
 ### Frontend structure
 
-| File | Responsibility |
+| File | What it does |
 |---|---|
 | `src/api.ts` | Every call to the backend, plus the shared types |
-| `src/pages/TaskListPage.tsx` | Task list with status and assignee dropdowns |
-| `src/pages/CreateTaskPage.tsx` | Task creation form |
-| `src/components/TaskFormNode.tsx` | One task's form fields; renders itself again for each subtask |
-| `src/components/NoticeDialog.tsx` | Popup message, built on the browser's `<dialog>` element |
-| `src/taskDraft.ts` | The unsaved form tree and its conversion to the API format |
+| `src/pages/TaskListPage.tsx` | The task list: filters, cards, and the edit/delete/message popups |
+| `src/pages/CreateTaskPage.tsx` | The create form |
+| `src/components/TaskCard.tsx` | One task card, which draws itself again for each subtask |
+| `src/components/TaskFormNode.tsx` | One task's form fields, which draws itself again for each subtask |
+| `src/components/AssigneePicker.tsx`, `Avatar.tsx` | Avatar button, hover card and developer menu |
+| `src/components/PriorityPicker.tsx`, `DuePill.tsx`, `ProgressBar.tsx`, `SkillChips.tsx` | The pills and progress bar on a card |
+| `src/components/FilterBar.tsx` | Search box and filter toggles |
+| `src/components/Modal.tsx` and the dialogs | Popups, built on the browser's own `<dialog>` |
+| `src/lib/taskFilters.ts`, `src/lib/dates.ts` | Filtering, progress and due-date logic, kept as plain functions so they're easy to test |
+| `src/taskDraft.ts` | The unsaved form tree and turning it into what the API expects |
 
-Server data is loaded and refreshed with TanStack Query. After a change, the task list is
-fetched again, so the page always shows what the server has.
+TanStack Query loads the data and keeps it fresh. After any change the task list is fetched
+again, so the screen always shows what the server actually saved.
 
 ## Database design
 
@@ -163,9 +186,12 @@ erDiagram
         int id PK
         text title "not blank"
         task_status status "To-do, In Progress, Done"
+        task_priority priority "Low, Medium, High"
+        date due_date "nullable"
         int assignee_id FK "nullable"
         int parent_id FK "nullable, null for top-level tasks"
         boolean skills_pending "true if the LLM could not identify skills"
+        text skills_source "user or ai"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -179,33 +205,40 @@ erDiagram
     }
 ```
 
-- **Skills are a separate table** linked to developers and tasks through join tables, because a
+The main decisions:
+
+- **Skills get their own table**, linked to developers and tasks through join tables, since a
   skill belongs to many developers and many tasks (many-to-many).
-- **A task has at most one assignee**, so `assignee_id` is a nullable column on `tasks`.
-- **A subtask is a task row with a `parent_id`.** It automatically has every property of a task,
-  and nesting can go as deep as needed. Subtask trees are read with a recursive SQL query
+- **A task has at most one assignee**, so `assignee_id` is just a nullable column on `tasks`.
+- **A subtask is a task row with a `parent_id`.** That way it gets every property of a task for
+  free and can nest as deep as needed. Whole trees are read with a recursive query
   (`WITH RECURSIVE`).
-- **Status is a PostgreSQL enum**, so only valid statuses can be stored.
-- **Migrations are versioned SQL files** in `backend/migrations`. Each part of the requirements
-  that changed the schema added a new migration rather than editing an old one:
-  `0001_create_core_tables`, `0002_add_subtasks`, `0003_add_skills_pending`.
+- **Status is a PostgreSQL enum**, so the database itself refuses anything that isn't a real
+  status.
+- **Migrations are versioned SQL files** in `backend/migrations`. Whenever a part of the brief
+  changed the schema, I added a new migration instead of editing an old one, so the history
+  shows how the design grew: `0001_create_core_tables`, `0002_add_subtasks`,
+  `0003_add_skills_pending`, and `0004_add_priority_due_date_skills_source` for the extras.
+- **Due dates are a `DATE`**, not a timestamp, and travel as text like `"2026-11-05"`. A
+  deadline is a day, not a moment, and this way it can't shift by a day because of time zones.
 
 ## API
 
-Base URL: `/api` (through nginx at http://localhost:8080/api). All bodies are JSON.
+Base URL: `/api` (through nginx at http://localhost:8080/api). Everything is JSON.
 
-| Method | Path | Description |
+| Method | Path | What it does |
 |---|---|---|
 | `GET` | `/api/tasks` | All top-level tasks, each with its subtasks nested inside |
-| `GET` | `/api/tasks/:id` | One task (any level) with the subtasks below it |
+| `GET` | `/api/tasks/:id` | One task (at any level) with the subtasks below it |
 | `POST` | `/api/tasks` | Create a task, optionally with nested subtasks |
-| `PATCH` | `/api/tasks/:id` | Change a task's status and/or assignee |
-| `POST` | `/api/tasks/:id/identify-skills` | Retry LLM skill identification for a task whose skills are pending |
+| `PATCH` | `/api/tasks/:id` | Change a task's status, assignee, title, skills, priority or due date |
+| `DELETE` | `/api/tasks/:id` | Delete a task and all its subtasks (`204 No Content`) |
+| `POST` | `/api/tasks/:id/identify-skills` | Ask Gemini again for a task whose skills are pending |
 | `GET` | `/api/developers` | All developers with their skills and assigned tasks |
 | `GET` | `/api/developers/:id` | One developer |
 | `GET` | `/api/skills` | All skills with the developers who have them |
 | `GET` | `/api/skills/:id` | One skill |
-| `GET` | `/health` | Backend health check (used by Docker; not exposed through nginx) |
+| `GET` | `/health` | Backend health check (used by Docker, not exposed through nginx) |
 
 ### Create a task
 
@@ -215,6 +248,8 @@ Base URL: `/api` (through nginx at http://localhost:8080/api). All bodies are JS
 {
   "title": "Build the profile feature",
   "skillIds": [1, 2],
+  "priority": "High",
+  "dueDate": "2026-11-20",
   "subtasks": [
     { "title": "Build the profile page", "skillIds": [1] },
     { "title": "Add the profile API", "subtasks": [] }
@@ -222,13 +257,15 @@ Base URL: `/api` (through nginx at http://localhost:8080/api). All bodies are JS
 }
 ```
 
-- `title` is required (1-1000 characters after trimming).
-- `skillIds` is optional. If it is empty or missing, the LLM identifies the skills.
-- `subtasks` is optional and has the same shape, nested up to 10 levels and 100 tasks in total.
-- New tasks are always `To-do` and unassigned.
-- The whole tree is saved in one transaction: if anything is invalid, nothing is saved.
+- `title` is required (1-1000 characters, after trimming spaces).
+- `skillIds` is optional. Leave it empty or out and Gemini picks the skills.
+- `priority` is optional: `Low`, `Medium` (default) or `High`.
+- `dueDate` is optional: a date as `YYYY-MM-DD`, or `null`.
+- `subtasks` is optional and has the same shape, up to 10 levels deep and 100 tasks in total.
+- New tasks always start as `To-do` and unassigned.
+- The whole tree saves in one transaction, so if anything in it is invalid, nothing is saved.
 
-Response `201`: the created task, in the same format as `GET /api/tasks/:id`.
+Response `201`: the new task, in the same shape as `GET /api/tasks/:id`.
 
 ### Task format
 
@@ -237,8 +274,11 @@ Response `201`: the created task, in the same format as `GET /api/tasks/:id`.
   "id": 1,
   "title": "Build the profile feature",
   "status": "To-do",
+  "priority": "High",
+  "dueDate": "2026-11-20",
   "parentId": null,
   "skillsPending": false,
+  "skillsSource": "user",
   "skills": [{ "id": 2, "name": "Backend" }, { "id": 1, "name": "Frontend" }],
   "assignee": null,
   "createdAt": "2026-11-02T08:00:00.000Z",
@@ -255,12 +295,16 @@ Response `201`: the created task, in the same format as `GET /api/tasks/:id`.
 { "status": "Done", "assigneeId": 3 }
 ```
 
-- Send `status`, `assigneeId`, or both. Statuses: `To-do`, `In Progress`, `Done`.
-- `"assigneeId": null` unassigns the task. Leaving `assigneeId` out keeps the current assignee.
+- Send any of `status`, `assigneeId`, `title`, `skillIds`, `priority` and `dueDate`. Anything
+  you leave out stays as it is.
+- `"assigneeId": null` unassigns the task, and `"dueDate": null` clears the due date.
+- `skillIds` replaces the task's skills and needs at least one. Skills set this way count as
+  picked by the user (`skillsSource: "user"`). If the current assignee doesn't have the new
+  skills, the change is refused.
 
 ### Errors
 
-Every error has the same format:
+Every error comes back in the same shape:
 
 ```json
 { "error": { "code": "DEVELOPER_MISSING_SKILLS", "message": "This developer is missing the required skill(s): Backend" } }
@@ -336,8 +380,8 @@ npm run llm:check
 
 | Suite | Command | What it covers |
 |---|---|---|
-| Backend (58 tests) | `cd backend && npm test` | Every endpoint against a real PostgreSQL database, all business rules, simultaneous updates, LLM answer validation, and LLM failure handling |
-| Frontend (9 tests) | `cd frontend && npm test` | The recursive subtask form (numbering, nesting, removing, depth limit, Save label, the request it sends, error display) and the "assign first" popup on the task list |
+| Backend (71 tests) | `cd backend && npm test` | Every endpoint against a real PostgreSQL database, all business rules, editing and deleting, simultaneous updates, LLM answer validation, and LLM failure handling |
+| Frontend (28 tests) | `cd frontend && npm test` | The recursive subtask form; the task list's popup, assignee menu, priority, progress, AI marker, filters, edit and delete; and the filter, progress and due-date logic |
 
 The LLM is replaced with a fake in automated tests so they are fast and free. Backend tests need
 PostgreSQL on `localhost:5432` (see below); they create and use a separate
@@ -392,6 +436,7 @@ Gemini is called with the built-in `fetch` rather than an SDK, since only one en
 | `react-router-dom` | Client-side routing between the two pages of the single-page app. |
 | `@tanstack/react-query` | Handles loading, error and refresh states for server data, which would otherwise need hand-written state in every page. |
 | `tailwindcss`, `@tailwindcss/vite` | Styling with utility classes in the markup, with no separate CSS files to maintain. |
+| `lucide-react` | Small, consistent icons (flags, calendar, sparkle, menu). Each icon is its own component, so only the icons used end up in the build. |
 | `vitest`, `jsdom`, `@testing-library/*` | Component tests that use the form the way a user would. |
 | `oxlint` | Linting, included by the Vite template. |
 
@@ -412,10 +457,13 @@ The brief allows assumptions where details are not specified. These were made:
 - **A Done task's subtasks cannot be reopened** until the parent is reopened (see Business rules).
 - **Nesting is limited** to 10 levels and 100 tasks per request, to protect the server from
   very large requests.
-- **Tasks are not edited or deleted**, since the brief does not ask for it. Titles and skills are
-  fixed after creation.
+- **Editing** covers the title, skills, priority and due date. Skills cannot be emptied while
+  editing; leaving them empty for the LLM to fill in is only offered when creating a task.
+- **Deleting a task deletes its subtasks too.**
+- **Subtasks cannot be moved** to another parent after creation.
+- **Avatars show initials**, since developers have no profile pictures in the data.
 - **The three wireframe tasks are seeded as demo data** in addition to the required developers
-  and skills.
+  and skills, with sample priorities and due dates set relative to the day the seed runs.
 - **No authentication**, since the brief does not mention users or login.
 
 ## Requirements coverage
@@ -435,12 +483,37 @@ The brief allows assumptions where details are not specified. These were made:
 | 6.1-6.2 Containerised and run with docker-compose | `docker-compose.yml`, `backend/Dockerfile`, `frontend/Dockerfile` |
 | 7.1 Public repository with README | This file |
 
+## Extras beyond the brief
+
+The Git tag [`v1-requirement`](../../tree/v1-requirement) marks the version that does
+exactly what the brief asks. Once that was done, I added these on top, with every original
+requirement still working. The tag [`v2-enhancement`](../../tree/v2-enhancement) marks this
+version:
+
+- Task cards with a pastel theme, instead of the table
+- Edit and delete from a ⋯ menu on each card
+- Priority (High, Medium, Low) with colour-coded flag pills
+- Due dates with a calendar pill that changes colour as the deadline gets close
+- Assignee avatars with a hover card showing name and skills
+- Progress bars on tasks with subtasks
+- A ✨ on skills that Gemini picked
+- Search and quick filters
+
+I added these after putting myself in a user's shoes and asking how this app would fit into my
+own workflow. Each one is something that would help me keep my tasks organised day to day.
+
+## What I'd do next
+
+- Let subtasks be added to an existing task, and moved to a different parent
+- Login, so "assigned to me" and an activity history become possible
+- A way for admins to manage developers and skills from the app
+
 ## Project structure
 
 ```
 .
 ├── docker-compose.yml          # db, backend and frontend
-├── docker-compose.dev.yml      # exposes the database for local development
+├── docker-compose.dev.yml      # opens the database for local development
 ├── backend
 │   ├── Dockerfile
 │   ├── migrations/             # versioned SQL schema changes
@@ -462,7 +535,8 @@ The brief allows assumptions where details are not specified. These were made:
     └── src
         ├── api.ts              # every call to the backend
         ├── App.tsx             # header and page routes
-        ├── components/         # the subtask form and the popup
+        ├── components/         # cards, form, pickers, popups
+        ├── lib/                # filters, dates, styles
         ├── pages/              # TaskListPage, CreateTaskPage
         └── taskDraft.ts
 ```

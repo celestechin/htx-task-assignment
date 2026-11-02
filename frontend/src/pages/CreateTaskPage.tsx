@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createTask, getSkills } from '../api'
 import TaskFormNode from '../components/TaskFormNode'
+import { BUTTON_PRIMARY } from '../lib/styles'
 import { newTaskDraft, toNewTask, type TaskDraft } from '../taskDraft'
 
 // subtasks at every level, for the save button's text
@@ -39,16 +40,16 @@ export default function CreateTaskPage() {
 
   return (
     <>
-      <h1 className="mb-4 text-2xl font-semibold">Create Task(s)</h1>
+      <h1 className="mb-6 text-3xl font-bold text-violet-950">Create Task(s)</h1>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {create.isError && (
-          <p role="alert" className="rounded-md bg-red-100 px-3 py-2 text-sm text-red-800">
+          <p role="alert" className="rounded-xl bg-rose-100 px-3 py-2 text-sm text-rose-800">
             {create.error.message}
           </p>
         )}
         {skills.isError && (
-          <p role="alert" className="text-sm text-red-700">
+          <p role="alert" className="text-sm text-rose-700">
             Could not load skills.
           </p>
         )}
@@ -60,11 +61,7 @@ export default function CreateTaskPage() {
           {subtaskCount > 0 && (
             <p className="text-sm text-slate-500">The task and all its subtasks are saved together.</p>
           )}
-          <button
-            type="submit"
-            disabled={create.isPending}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
-          >
+          <button type="submit" disabled={create.isPending} className={BUTTON_PRIMARY}>
             {create.isPending
               ? 'Saving...'
               : subtaskCount > 0

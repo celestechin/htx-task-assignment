@@ -6,13 +6,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTask, getSkills, type Task } from '../api'
 import CreateTaskPage from './CreateTaskPage'
 
-vi.mock('../api', () => ({ createTask: vi.fn(), getSkills: vi.fn() }))
+// swap the api for fakes so these run without the backend
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api')>()),
+  createTask: vi.fn(),
+  getSkills: vi.fn(),
+}))
 
 const nameOf = (number: string) => (number === '1' ? 'Task 1' : `Subtask ${number}`)
 
 const titleBox = (number: string) => screen.getByLabelText(`${nameOf(number)} Title`)
 const queryTitleBox = (number: string) => screen.queryByLabelText(`${nameOf(number)} Title`)
-const card = (number: string) => titleBox(number).closest('div.rounded-lg') as HTMLElement
+const card = (number: string) => titleBox(number).closest('div.rounded-2xl') as HTMLElement
 
 const addSubtaskUnder = (number: string) =>
   userEvent.click(screen.getByRole('button', { name: `Add subtask under ${number}` }))
@@ -81,16 +86,24 @@ describe('CreateTaskPage', () => {
     await user.type(titleBox('1.1'), 'Child')
     await user.type(titleBox('1.1.1'), 'Grandchild')
     await user.click(within(card('1.1')).getByRole('checkbox', { name: 'Backend' }))
+    await user.click(within(card('1.1')).getByRole('radio', { name: 'High' }))
+    await user.type(screen.getByLabelText('Subtask 1.1 Due date'), '2026-12-01')
     await user.click(screen.getByRole('button', { name: /^Save task/ }))
 
     expect(vi.mocked(createTask).mock.calls[0][0]).toEqual({
       title: 'Parent',
       skillIds: [],
+      priority: 'Medium',
+      dueDate: null,
       subtasks: [
         {
           title: 'Child',
           skillIds: [2],
-          subtasks: [{ title: 'Grandchild', skillIds: [], subtasks: [] }],
+          priority: 'High',
+          dueDate: '2026-12-01',
+          subtasks: [
+            { title: 'Grandchild', skillIds: [], priority: 'Medium', dueDate: null, subtasks: [] },
+          ],
         },
       ],
     })

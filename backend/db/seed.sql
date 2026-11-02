@@ -28,19 +28,23 @@ JOIN developers ON developers.name = seed.developer_name
 JOIN skills ON skills.name = seed.skill_name
 ON CONFLICT (developer_id, skill_id) DO NOTHING;
 
--- demo data, not needed by section 1.2: the 3 wireframe tasks as separate top-level tasks
--- so the list isn't empty on first start
--- only added if no top-level task has that title yet, skills only linked to tasks added here
-WITH demo (position, title, skill_names, assignee_name) AS (
+-- demo tasks: the 3 from the wireframe, so the list isn't empty on first start
+-- not required by the brief
+-- due dates count from the day the seed runs so the demo always shows a mix of colours
+WITH demo (position, title, skill_names, assignee_name, priority, due_in_days) AS (
   VALUES
-    (1, 'As a visitor, I want to see a responsive homepage so that I can easily navigate on both desktop and mobile devices.', ARRAY['Frontend'], 'Alice'),
-    (2, 'As a system administrator, I want audit logs of all data access and modifications so that I can ensure compliance with data protection regulations and investigate any security incidents.', ARRAY['Backend'], NULL),
-    (3, 'As a logged-in user, I want to update my profile information and upload a profile picture so that my account details are accurate and personalized.', ARRAY['Frontend', 'Backend'], NULL)
+    (1, 'As a visitor, I want to see a responsive homepage so that I can easily navigate on both desktop and mobile devices.', ARRAY['Frontend'], 'Alice', 'High', 2),
+    (2, 'As a system administrator, I want audit logs of all data access and modifications so that I can ensure compliance with data protection regulations and investigate any security incidents.', ARRAY['Backend'], NULL, 'Medium', 10),
+    (3, 'As a logged-in user, I want to update my profile information and upload a profile picture so that my account details are accurate and personalized.', ARRAY['Frontend', 'Backend'], NULL, 'Low', NULL)
 ),
 -- only add a demo task if no top-level task has that title yet
 inserted AS (
-  INSERT INTO tasks (title, assignee_id)
-  SELECT demo.title, developers.id
+  INSERT INTO tasks (title, assignee_id, priority, due_date)
+  SELECT
+    demo.title,
+    developers.id,
+    demo.priority::task_priority,
+    current_date + demo.due_in_days::int
   FROM demo
   LEFT JOIN developers ON developers.name = demo.assignee_name
   WHERE NOT EXISTS (

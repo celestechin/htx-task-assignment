@@ -1,5 +1,10 @@
 import 'dotenv/config';
-import { Pool, type PoolClient } from 'pg';
+import { Pool, types, type PoolClient } from 'pg';
+
+// keep DATE columns as plain "2026-11-05" text
+// pg would otherwise turn them into a js Date and the day can shift with time zones
+const DATE_TYPE_ID = 1082;
+types.setTypeParser(DATE_TYPE_ID, (value) => value);
 
 // a pool reuses open connections instead of opening a new one per request
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });

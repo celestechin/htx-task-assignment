@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   createTask,
+  deleteTask,
   getTask,
   listTasks,
   retrySkillIdentification,
@@ -28,6 +29,12 @@ tasksRouter.post('/', async (req, res) => {
 tasksRouter.patch('/:id', async (req, res) => {
   const id = idParam.parse(req.params.id);
   res.json(await updateTask(id, updateTaskBody.parse(req.body)));
+});
+
+// 204 = done, nothing to send back
+tasksRouter.delete('/:id', async (req, res) => {
+  await deleteTask(idParam.parse(req.params.id));
+  res.status(204).end();
 });
 
 // the retry link for tasks gemini couldn't identify skills for

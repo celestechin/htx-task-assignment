@@ -1,13 +1,22 @@
 import { z } from 'zod';
 
-// biggest number a postgres INTEGER column can hold
+// zod checks request bodies while the app runs
+// typescript types disappear at runtime so they can't protect the api on their own
+
+// largest number a postgres INTEGER column can hold, anything bigger would crash the query
 const MAX_ID = 2147483647;
 
 // must match the task_status and task_priority enums in the migrations
 export const TASK_STATUSES = ['To-do', 'In Progress', 'Done'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+export const TASK_PRIORITIES = ['Low', 'Medium', 'High'] as const;
+
 const id = z.number().int().positive().max(MAX_ID);
+// trim first so a title of only spaces counts as empty
+const title = z.string().trim().min(1, 'Title is required').max(1000);
+// date as "2026-11-05", null clears it
+const dueDate = z.iso.date('Use a date like 2026-11-05').nullable();
 
 // convert URL parameters from string to int
 export const idParam = z.coerce.number().int().positive().max(MAX_ID);
@@ -18,9 +27,12 @@ export const MAX_TASKS_PER_REQUEST = 100;
 
 // strictObject rejects any field we don't know about
 const taskNode = z.strictObject({
-  title: z.string().trim().min(1, 'Title is required').max(1000),
+  title,
   skillIds: z.array(id).default([]),
-  // getter so the schema can refer to itself, subtasks are tasks too
+  priority: z.enum(TASK_PRIORITIES).default('Medium'),
+  dueDate: dueDate.default(null),
+
+  // a getter lets the schema point to itself, since subtasks are tasks too
   get subtasks() {
     return z.array(taskNode).default([]);
   },
@@ -58,9 +70,14 @@ export const updateTaskBody = z
     status: z.enum(TASK_STATUSES).optional(),
     // null means unassign, leaving it out means don't touch it
     assigneeId: id.nullable().optional(),
+    title: title.optional(),
+    // when editing, skills are chosen by the user, so at least one is required
+    skillIds: z.array(id).min(1, 'Choose at least one skill').optional(),
+    priority: z.enum(TASK_PRIORITIES).optional(),
+    dueDate: dueDate.optional(),
   })
-  .refine((body) => body.status !== undefined || body.assigneeId !== undefined, {
-    message: 'Provide status or assigneeId',
+  .refine((body) => Object.values(body).some((value) => value !== undefined), {
+    message: 'Provide at least one field to change',
   });
 
 export type CreateTaskInput = z.infer<typeof createTaskBody>;

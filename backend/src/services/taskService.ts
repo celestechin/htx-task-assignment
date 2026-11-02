@@ -12,8 +12,11 @@ const SELECT_TASKS = `
     t.id,
     t.title,
     t.status,
+    t.priority,
+    t.due_date AS "dueDate",
     t.parent_id AS "parentId",
     t.skills_pending AS "skillsPending",
+    t.skills_source AS "skillsSource",
     COALESCE(
       (
         SELECT json_agg(json_build_object('id', s.id, 'name', s.name) ORDER BY s.name)
@@ -162,11 +165,22 @@ async function insertTask(
   parentId: number | null,
   identified: IdentifiedSkills,
 ): Promise<number> {
-  const skillIds = task.skillIds.length > 0 ? task.skillIds : identified.get(task);
+  const chosenByUser = task.skillIds.length > 0;
+  // undefined here means gemini didn't give us anything for this task
+  const skillIds = chosenByUser ? task.skillIds : identified.get(task);
 
   const inserted = await client.query(
-    'INSERT INTO tasks (title, parent_id, skills_pending) VALUES ($1, $2, $3) RETURNING id',
-    [task.title, parentId, skillIds === undefined],
+    `INSERT INTO tasks (title, parent_id, skills_pending, skills_source, priority, due_date)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id`,
+    [
+      task.title,
+      parentId,
+      skillIds === undefined,
+      chosenByUser ? 'user' : 'ai',
+      task.priority,
+      task.dueDate,
+    ],
   );
   const id: number = inserted.rows[0].id;
 
@@ -223,7 +237,13 @@ export async function retrySkillIdentification(id: number) {
   return getTask(id);
 }
 
-export async function updateTask(id: number, { status, assigneeId }: UpdateTaskInput) {
+// one place for every change to a task, all the rules are checked inside one transaction
+export async function updateTask(id: number, changes: UpdateTaskInput) {
+  const { status, assigneeId, title, skillIds, priority, dueDate } = changes;
+  if (skillIds !== undefined) {
+    await assertSkillsExist(skillIds);
+  }
+
   await withTransaction(async (client) => {
     // parent_id never changes after creation, so it's safe to read without a lock
     const task = await client.query('SELECT parent_id FROM tasks WHERE id = $1', [id]);
@@ -242,10 +262,12 @@ export async function updateTask(id: number, { status, assigneeId }: UpdateTaskI
       id,
     ]);
 
+    // the assignee once this request is applied, since it can assign and change status together
+    const assigneeAfterUpdate: number | null =
+      assigneeId === undefined ? locked.rows[0].assignee_id : assigneeId;
+
     // status changes: needs an assignee first, then the done rules for subtasks
     if (status !== undefined) {
-      // a request can assign and change status together, so check the assignee it will end up with
-      const assigneeAfterUpdate = assigneeId === undefined ? locked.rows[0].assignee_id : assigneeId;
       if (assigneeAfterUpdate === null) {
         throw new ApiError(
           422,
@@ -256,22 +278,57 @@ export async function updateTask(id: number, { status, assigneeId }: UpdateTaskI
       await assertStatusChangeAllowed(client, id, status, parent.rows[0]?.status);
     }
 
-    if (assigneeId !== undefined && assigneeId !== null) {
-      await assertDeveloperCanTakeTask(client, id, assigneeId);
+    // skills edited by the user replace the old ones, including any picked by gemini
+    // so the sparkle goes away (skills_source becomes 'user')
+    if (skillIds !== undefined) {
+      await client.query('DELETE FROM task_skills WHERE task_id = $1', [id]);
+      await insertTaskSkills(client, id, skillIds);
+      await client.query(
+        `UPDATE tasks SET skills_pending = false, skills_source = 'user' WHERE id = $1`,
+        [id],
+      );
     }
 
-    // assigneeId: undefined = leave it, null = unassign, number = assign
+    // checked after the skills are replaced, so new skills get checked against the assignee too
+    // otherwise an edit could sneak past the skill rule
+    if (assigneeAfterUpdate !== null && (assigneeId !== undefined || skillIds !== undefined)) {
+      await assertDeveloperCanTakeTask(client, id, assigneeAfterUpdate);
+    }
+
+    // fields left out of the request keep their value (COALESCE)
+    // assigneeId and dueDate can also be set to null, so a separate true/false says if they were sent
     await client.query(
       `UPDATE tasks
        SET status = COALESCE($2::task_status, status),
            assignee_id = CASE WHEN $3::boolean THEN $4::int ELSE assignee_id END,
+           title = COALESCE($5, title),
+           priority = COALESCE($6::task_priority, priority),
+           due_date = CASE WHEN $7::boolean THEN $8::date ELSE due_date END,
            updated_at = now()
        WHERE id = $1`,
-      [id, status ?? null, assigneeId !== undefined, assigneeId ?? null],
+      [
+        id,
+        status ?? null,
+        assigneeId !== undefined,
+        assigneeId ?? null,
+        title ?? null,
+        priority ?? null,
+        dueDate !== undefined,
+        dueDate ?? null,
+      ],
     );
   });
 
   return getTask(id);
+}
+
+// deletes the task and all its subtasks
+// ON DELETE CASCADE on parent_id does the subtasks for us
+export async function deleteTask(id: number) {
+  const deleted = await pool.query('DELETE FROM tasks WHERE id = $1 RETURNING id', [id]);
+  if (deleted.rows.length === 0) {
+    throw new ApiError(404, 'TASK_NOT_FOUND', `Task ${id} does not exist`);
+  }
 }
 
 // keeps this always true: a done task only has done subtasks

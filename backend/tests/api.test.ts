@@ -186,7 +186,7 @@ describe('PATCH /api/tasks/:id', () => {
 
     expect((await request(app).patch(url).send({ status: 'Blocked' })).status).toBe(400);
     expect((await request(app).patch(url).send({})).status).toBe(400);
-    expect((await request(app).patch(url).send({ title: 'New' })).status).toBe(400);
+    expect((await request(app).patch(url).send({ parentId: 1 })).status).toBe(400);
   });
 
   it('returns 404 for a missing task', async () => {

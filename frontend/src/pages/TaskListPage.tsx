@@ -1,36 +1,31 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  deleteTask,
   getDevelopers,
+  getSkills,
   getTasks,
   retryIdentifySkills,
-  TASK_STATUSES,
   updateTask,
-  type Developer,
   type Task,
   type TaskChanges,
-  type TaskStatus,
 } from '../api'
+import ConfirmDialog from '../components/ConfirmDialog'
+import EditTaskDialog from '../components/EditTaskDialog'
+import FilterBar from '../components/FilterBar'
 import NoticeDialog from '../components/NoticeDialog'
-
-const selectClass =
-  'w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm disabled:opacity-50'
-
-// a developer can take a task only if they have every skill it needs
-function isEligible(developer: Developer, task: Task) {
-  return task.skills.every((required) =>
-    developer.skills.some((skill) => skill.id === required.id),
-  )
-}
-
-// each task goes right after its parent, depth is used for the indent
-function flattenTasks(tasks: Task[], depth = 0): { task: Task; depth: number }[] {
-  return tasks.flatMap((task) => [
-    { task, depth },
-    ...flattenTasks(task.subtasks, depth + 1),
-  ])
-}
+import TaskCard, { AiLegend } from '../components/TaskCard'
+import { todayString } from '../lib/dates'
+import { BUTTON_PRIMARY } from '../lib/styles'
+import {
+  countMatches,
+  countTasks,
+  filterTasks,
+  NO_FILTERS,
+  type TaskFilters,
+} from '../lib/taskFilters'
 
 // the main page: filters, task cards and the popups
 export default function TaskListPage() {
@@ -38,18 +33,50 @@ export default function TaskListPage() {
   const queryClient = useQueryClient()
   const tasks = useQuery({ queryKey: ['tasks'], queryFn: getTasks })
   const developers = useQuery({ queryKey: ['developers'], queryFn: getDevelopers })
-  const [notice, setNotice] = useState<string | null>(null)
+  const skills = useQuery({ queryKey: ['skills'], queryFn: getSkills })
 
+  // remembers what's on screen: filters, popup message, task being edited or deleted
+  const [filters, setFilters] = useState<TaskFilters>(NO_FILTERS)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [editing, setEditing] = useState<Task | null>(null)
+  const [deleting, setDeleting] = useState<Task | null>(null)
+
+  // after any change, fetch the list again so the screen shows what the server saved
+  const refreshTasks = () => queryClient.invalidateQueries({ queryKey: ['tasks'] })
+
+  // errors from the server show in the same popup as other messages
   const update = useMutation({
     mutationFn: ({ id, changes }: { id: number; changes: TaskChanges }) =>
       updateTask(id, changes),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+    onError: (error) => setNotice(error.message),
+    onSettled: refreshTasks,
   })
 
   const retrySkills = useMutation({
     mutationFn: retryIdentifySkills,
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+    onError: (error) => setNotice(error.message),
+    onSettled: refreshTasks,
   })
+
+  const remove = useMutation({
+    mutationFn: deleteTask,
+    onSuccess: () => setDeleting(null),
+    onError: (error) => {
+      setDeleting(null)
+      setNotice(error.message)
+    },
+    onSettled: refreshTasks,
+  })
+
+  // ensure each task is assigned first before changing status
+  // the backend checks this too, this just saves a pointless request
+  function handleUpdate(task: Task, changes: TaskChanges) {
+    if (changes.status !== undefined && !task.assignee) {
+      setNotice('Please assign this task to a developer before changing its status.')
+      return
+    }
+    update.mutate({ id: task.id, changes })
+  }
 
   if (tasks.isPending || developers.isPending) {
     return <p className="text-slate-500">Loading tasks...</p>
@@ -57,132 +84,87 @@ export default function TaskListPage() {
 
   if (tasks.isError || developers.isError) {
     return (
-      <p role="alert" className="text-red-700">
+      <p role="alert" className="text-rose-700">
         Could not load tasks. Please check that the server is running.
       </p>
     )
   }
 
+  const today = todayString()
+  const visible = filterTasks(tasks.data, filters, today)
+  // for the delete popup, so it can warn how many subtasks go too
+  const deletingSubtasks = deleting ? countTasks(deleting.subtasks) : 0
+
   return (
     <>
-      <h1 className="mb-4 text-2xl font-semibold">Tasks</h1>
-      {/* popups live at page level, cards just ask for them to open */}
-      <NoticeDialog message={notice} onClose={() => setNotice(null)} />
-
-      {(update.isError || retrySkills.isError) && (
-        <p role="alert" className="mb-4 rounded-md bg-red-100 px-3 py-2 text-sm text-red-800">
-          {update.error?.message ?? retrySkills.error?.message}
-        </p>
-      )}
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-violet-950">Tasks</h1>
+          <AiLegend />
+        </div>
+        <Link to="/tasks/new" className={`inline-flex items-center gap-1 ${BUTTON_PRIMARY}`}>
+          <Plus size={16} aria-hidden="true" />
+          New task
+        </Link>
+      </div>
 
       {tasks.data.length === 0 ? (
-        <p className="text-slate-500">
+        <p className="rounded-2xl bg-white/70 p-6 text-slate-500">
           No tasks yet.{' '}
-          <Link to="/tasks/new" className="text-blue-700 underline">
+          <Link to="/tasks/new" className="font-medium text-violet-600 underline">
             Create the first one
           </Link>
           .
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="border-b border-slate-200 text-slate-500">
-              <tr>
-                <th className="px-4 py-3 font-medium">Task Title</th>
-                <th className="px-4 py-3 font-medium">Skills</th>
-                <th className="w-40 px-4 py-3 font-medium">Status</th>
-                <th className="w-40 px-4 py-3 font-medium">Assignee</th>
-              </tr>
-            </thead>
-            <tbody>
-              {flattenTasks(tasks.data).map(({ task, depth }) => {
-                const isSaving = update.isPending && update.variables.id === task.id
-                return (
-                  <tr key={task.id} className="border-b border-slate-100 last:border-0">
-                    <td
-                      className="px-4 py-3 align-top"
-                      style={{ paddingLeft: `${1 + depth * 1.5}rem` }}
-                    >
-                      {task.title}
-                    </td>
-                    <td className="px-4 py-3 align-top text-slate-600">
-                      {task.skillsPending ? (
-                        <>
-                          <span className="block text-amber-700">Not identified</span>
-                          <button
-                            type="button"
-                            disabled={retrySkills.isPending}
-                            onClick={() => retrySkills.mutate(task.id)}
-                            className="text-blue-700 underline disabled:opacity-50"
-                          >
-                            {retrySkills.isPending && retrySkills.variables === task.id
-                              ? 'Retrying...'
-                              : 'Retry'}
-                          </button>
-                        </>
-                      ) : (
-                        task.skills.map((skill) => skill.name).join(', ')
-                      )}
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <select
-                        aria-label={`Status of ${task.title}`}
-                        className={selectClass}
-                        disabled={isSaving}
-                        value={task.status}
-                        onChange={(event) => {
-                          // dropdown keeps showing the saved status since nothing changed
-                          if (!task.assignee) {
-                            setNotice(
-                              'Please assign this task to a developer before changing its status.',
-                            )
-                            return
-                          }
-                          update.mutate({
-                            id: task.id,
-                            changes: { status: event.target.value as TaskStatus },
-                          })
-                        }}
-                      >
-                        {TASK_STATUSES.map((status) => (
-                          <option key={status} value={status}>
-                            {status}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <select
-                        aria-label={`Assignee of ${task.title}`}
-                        className={selectClass}
-                        disabled={isSaving || task.skillsPending}
-                        value={task.assignee?.id ?? ''}
-                        onChange={(event) =>
-                          update.mutate({
-                            id: task.id,
-                            changes: {
-                              assigneeId: event.target.value ? Number(event.target.value) : null,
-                            },
-                          })
-                        }
-                      >
-                        <option value="">Unassigned</option>
-                        {developers.data
-                          .filter((developer) => isEligible(developer, task))
-                          .map((developer) => (
-                            <option key={developer.id} value={developer.id}>
-                              {developer.name}
-                            </option>
-                          ))}
-                      </select>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <FilterBar
+            filters={filters}
+            shown={countMatches(visible)}
+            total={countTasks(tasks.data)}
+            onChange={setFilters}
+          />
+          {visible.length === 0 ? (
+            <p className="rounded-2xl bg-white/70 p-6 text-center text-slate-500">
+              No tasks match these filters.
+            </p>
+          ) : (
+            <ul className="space-y-4">
+              {visible.map((item) => (
+                <TaskCard
+                  key={item.task.id}
+                  item={item}
+                  developers={developers.data}
+                  today={today}
+                  savingTaskId={update.isPending ? update.variables.id : null}
+                  retryingTaskId={retrySkills.isPending ? retrySkills.variables : null}
+                  onUpdate={handleUpdate}
+                  onRetrySkills={(task) => retrySkills.mutate(task.id)}
+                  onEdit={setEditing}
+                  onDelete={setDeleting}
+                />
+              ))}
+            </ul>
+          )}
+        </>
       )}
+
+      {/* popups live at page level, cards just ask for them to open */}
+      <NoticeDialog message={notice} onClose={() => setNotice(null)} />
+      <EditTaskDialog task={editing} skills={skills.data ?? []} onClose={() => setEditing(null)} />
+      <ConfirmDialog
+        open={deleting !== null}
+        title="Delete this task?"
+        message={
+          deletingSubtasks > 0
+            ? `"${deleting?.title}" and its ${deletingSubtasks} subtask${deletingSubtasks === 1 ? '' : 's'} will be deleted. This cannot be undone.`
+            : `"${deleting?.title}" will be deleted. This cannot be undone.`
+        }
+        confirmLabel="Delete"
+        busy={remove.isPending}
+        onConfirm={() => deleting && remove.mutate(deleting.id)}
+        onCancel={() => setDeleting(null)}
+      />
     </>
   )
 }
