@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 import { pool, withTransaction } from '../db/pool';
 import { ApiError } from '../errors';
 import type { CreateTaskInput, TaskStatus, UpdateTaskInput } from '../validation';
+import { identifySkills } from './skillIdentification';
 
 // one query for a task with its skills and assignee
 // the subqueries return json so the frontend gets the nested shape straight away
@@ -12,6 +13,7 @@ const SELECT_TASKS = `
     t.title,
     t.status,
     t.parent_id AS "parentId",
+    t.skills_pending AS "skillsPending",
     COALESCE(
       (
         SELECT json_agg(json_build_object('id', s.id, 'name', s.name) ORDER BY s.name)
@@ -34,6 +36,8 @@ const SELECT_TASKS = `
 interface TaskRow {
   id: number;
   parentId: number | null;
+  title: string;
+  skillsPending: boolean;
   [column: string]: unknown;
 }
 
@@ -85,12 +89,19 @@ export async function getTask(id: number) {
   return buildTaskTree(result.rows)[0];
 }
 
-export async function createTask(task: CreateTaskInput) {
-  const taskId = await withTransaction(async (client) => {
-    await assertSkillsExist(client, collectSkillIds(task));
-    return insertTask(client, task, null);
-  });
+// task -> skill ids picked by gemini, only for tasks that came without skills
+type IdentifiedSkills = Map<CreateTaskInput, number[]>;
 
+export async function createTask(task: CreateTaskInput) {
+  // fail early on unknown skills before spending a gemini call
+  await assertSkillsExist(collectSkillIds(task));
+
+  // using Gemini to identify skills
+  // done before the transaction so a slow response doesn't hold a db connection
+  const identified = await identifyMissingSkills(collectTasksWithoutSkills(task));
+
+  // the whole tree saves together or not at all
+  const taskId = await withTransaction((client) => insertTask(client, task, null, identified));
   return getTask(taskId);
 }
 
@@ -99,14 +110,48 @@ function collectSkillIds(task: CreateTaskInput): number[] {
   return [...task.skillIds, ...task.subtasks.flatMap(collectSkillIds)];
 }
 
-async function assertSkillsExist(client: PoolClient, skillIds: number[]) {
+// every task in the tree the user left without skills
+function collectTasksWithoutSkills(task: CreateTaskInput): CreateTaskInput[] {
+  const below = task.subtasks.flatMap(collectTasksWithoutSkills);
+  return task.skillIds.length === 0 ? [task, ...below] : below;
+}
+
+async function assertSkillsExist(skillIds: number[]) {
   // dedupe first, otherwise [1, 1] would look like a missing skill
   const uniqueSkillIds = [...new Set(skillIds)];
-  const found = await client.query('SELECT id FROM skills WHERE id = ANY($1::int[])', [
+  const found = await pool.query('SELECT id FROM skills WHERE id = ANY($1::int[])', [
     uniqueSkillIds,
   ]);
   if (found.rows.length !== uniqueSkillIds.length) {
     throw new ApiError(400, 'UNKNOWN_SKILL', 'One or more skills do not exist');
+  }
+}
+
+// ask gemini for the skills of these titles and turn the names into ids
+async function identifySkillIds(titles: string[]): Promise<number[][]> {
+  // skills come from the db, so adding a new skill needs no code change here
+  const skills = await pool.query('SELECT id, name FROM skills');
+  const idsByName = new Map<string, number>(skills.rows.map((skill) => [skill.name, skill.id]));
+
+  const skillNames = await identifySkills(titles, [...idsByName.keys()]);
+  return skillNames.map((names) => names.map((name) => idsByName.get(name) as number));
+}
+
+// if gemini fails, the tasks are still saved, just without skills
+// losing what the user typed felt worse than a missing skill
+// tasks missing from the result are marked as skills_pending
+async function identifyMissingSkills(tasks: CreateTaskInput[]): Promise<IdentifiedSkills> {
+  if (tasks.length === 0) {
+    return new Map();
+  }
+
+  try {
+    // all titles in one call, a big tree still only costs one request
+    const skillIds = await identifySkillIds(tasks.map((task) => task.title));
+    return new Map(tasks.map((task, index) => [task, skillIds[index]]));
+  } catch (error) {
+    console.error('Skill identification failed:', (error as Error).message);
+    return new Map();
   }
 }
 
@@ -115,22 +160,67 @@ async function insertTask(
   client: PoolClient,
   task: CreateTaskInput,
   parentId: number | null,
+  identified: IdentifiedSkills,
 ): Promise<number> {
+  const skillIds = task.skillIds.length > 0 ? task.skillIds : identified.get(task);
+
   const inserted = await client.query(
-    'INSERT INTO tasks (title, parent_id) VALUES ($1, $2) RETURNING id',
-    [task.title, parentId],
+    'INSERT INTO tasks (title, parent_id, skills_pending) VALUES ($1, $2, $3) RETURNING id',
+    [task.title, parentId, skillIds === undefined],
   );
   const id: number = inserted.rows[0].id;
 
-  await client.query('INSERT INTO task_skills (task_id, skill_id) SELECT $1, unnest($2::int[])', [
-    id,
-    [...new Set(task.skillIds)],
-  ]);
+  await insertTaskSkills(client, id, skillIds ?? []);
 
   for (const subtask of task.subtasks) {
-    await insertTask(client, subtask, id);
+    await insertTask(client, subtask, id, identified);
   }
   return id;
+}
+
+// unnest turns the id list into rows so all skills go in with one insert
+async function insertTaskSkills(client: PoolClient, taskId: number, skillIds: number[]) {
+  await client.query('INSERT INTO task_skills (task_id, skill_id) SELECT $1, unnest($2::int[])', [
+    taskId,
+    [...new Set(skillIds)],
+  ]);
+}
+
+// the retry link: ask gemini again for a task that got saved without skills
+export async function retrySkillIdentification(id: number) {
+  const task = await getTask(id);
+  // nothing to do if it already has skills
+  if (!task.skillsPending) {
+    return task;
+  }
+
+  let skillIds: number[];
+  try {
+    [skillIds] = await identifySkillIds([task.title]);
+  } catch (error) {
+    console.error('Skill identification failed:', (error as Error).message);
+    throw new ApiError(
+      502,
+      'SKILL_IDENTIFICATION_FAILED',
+      'Skills could not be identified. Please try again later.',
+    );
+  }
+
+  await withTransaction(async (client) => {
+    // if two retries land at once, only the first one still finds it pending
+    const updated = await client.query(
+      `UPDATE tasks
+       SET skills_pending = false, updated_at = now()
+       WHERE id = $1 AND skills_pending
+       RETURNING id`,
+      [id],
+    );
+    if (updated.rows.length > 0) {
+      await insertTaskSkills(client, id, skillIds);
+    }
+  });
+
+  return getTask(id);
 }
 
 export async function updateTask(id: number, { status, assigneeId }: UpdateTaskInput) {
@@ -212,6 +302,16 @@ async function assertDeveloperCanTakeTask(client: PoolClient, taskId: number, de
   const developer = await client.query('SELECT id FROM developers WHERE id = $1', [developerId]);
   if (developer.rows.length === 0) {
     throw new ApiError(400, 'UNKNOWN_DEVELOPER', `Developer ${developerId} does not exist`);
+  }
+
+  // no skills yet would match every developer, so block it until gemini or the user sets them
+  const task = await client.query('SELECT skills_pending FROM tasks WHERE id = $1', [taskId]);
+  if (task.rows[0].skills_pending) {
+    throw new ApiError(
+      422,
+      'SKILLS_NOT_IDENTIFIED',
+      "This task can't be assigned until its required skills are identified",
+    );
   }
 
   // skills the task needs that this developer doesn't have

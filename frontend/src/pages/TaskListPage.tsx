@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   getDevelopers,
   getTasks,
+  retryIdentifySkills,
   TASK_STATUSES,
   updateTask,
   type Developer,
@@ -42,6 +43,11 @@ export default function TaskListPage() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
   })
 
+  const retrySkills = useMutation({
+    mutationFn: retryIdentifySkills,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+  })
+
   if (tasks.isPending || developers.isPending) {
     return <p className="text-slate-500">Loading tasks...</p>
   }
@@ -58,9 +64,9 @@ export default function TaskListPage() {
     <>
       <h1 className="mb-4 text-2xl font-semibold">Tasks</h1>
 
-      {update.isError && (
+      {(update.isError || retrySkills.isError) && (
         <p role="alert" className="mb-4 rounded-md bg-red-100 px-3 py-2 text-sm text-red-800">
-          {update.error.message}
+          {update.error?.message ?? retrySkills.error?.message}
         </p>
       )}
 
@@ -95,7 +101,23 @@ export default function TaskListPage() {
                       {task.title}
                     </td>
                     <td className="px-4 py-3 align-top text-slate-600">
-                      {task.skills.map((skill) => skill.name).join(', ')}
+                      {task.skillsPending ? (
+                        <>
+                          <span className="block text-amber-700">Not identified</span>
+                          <button
+                            type="button"
+                            disabled={retrySkills.isPending}
+                            onClick={() => retrySkills.mutate(task.id)}
+                            className="text-blue-700 underline disabled:opacity-50"
+                          >
+                            {retrySkills.isPending && retrySkills.variables === task.id
+                              ? 'Retrying...'
+                              : 'Retry'}
+                          </button>
+                        </>
+                      ) : (
+                        task.skills.map((skill) => skill.name).join(', ')
+                      )}
                     </td>
                     <td className="px-4 py-3 align-top">
                       <select
@@ -121,7 +143,7 @@ export default function TaskListPage() {
                       <select
                         aria-label={`Assignee of ${task.title}`}
                         className={selectClass}
-                        disabled={isSaving}
+                        disabled={isSaving || task.skillsPending}
                         value={task.assignee?.id ?? ''}
                         onChange={(event) =>
                           update.mutate({

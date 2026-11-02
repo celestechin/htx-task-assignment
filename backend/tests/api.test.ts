@@ -1,7 +1,9 @@
 import request from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/app';
 import { pool } from '../src/db/pool';
+
+vi.mock('../src/services/skillIdentification', () => ({ identifySkills: vi.fn() }));
 
 let frontend: number;
 let backend: number;

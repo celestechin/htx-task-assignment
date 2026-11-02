@@ -1,9 +1,13 @@
 import request from 'supertest';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/app';
 import { pool } from '../src/db/pool';
+import { identifySkills } from '../src/services/skillIdentification';
+
+vi.mock('../src/services/skillIdentification', () => ({ identifySkills: vi.fn() }));
 
 beforeEach(async () => {
+  vi.mocked(identifySkills).mockImplementation(async (titles) => titles.map(() => ['Frontend']));
   await pool.query('TRUNCATE tasks RESTART IDENTITY CASCADE');
 });
 
@@ -56,7 +60,6 @@ describe('creating subtasks', () => {
       .send({ title: 'Parent', subtasks: [{ title: 'Child', skillIds: [skills[1].id] }] });
     const child = response.body.subtasks[0];
 
-    expect(response.body.skills).toEqual([]);
     expect(child.skills).toEqual([{ id: skills[1].id, name: skills[1].name }]);
 
     const developers = (await request(app).get('/api/developers')).body;

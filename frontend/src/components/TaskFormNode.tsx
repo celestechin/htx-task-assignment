@@ -66,7 +66,10 @@ export default function TaskFormNode({
         </div>
 
         <fieldset>
-          <legend className="mb-1 text-sm font-medium">Task {number} required skills</legend>
+          <legend className="text-sm font-medium">Task {number} required skills</legend>
+          <p className="mb-1 text-xs text-slate-500">
+            Leave these empty and AI will identify the skills from the title.
+          </p>
           <div className="flex flex-wrap gap-4">
             {skills.map((skill) => (
               <label key={skill.id} className="flex items-center gap-2 text-sm">

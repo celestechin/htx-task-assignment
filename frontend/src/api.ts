@@ -18,6 +18,7 @@ export interface Task {
   title: string
   status: TaskStatus
   parentId: number | null
+  skillsPending: boolean
   skills: Skill[]
   assignee: { id: number; name: string } | null
   subtasks: Task[]
@@ -63,3 +64,6 @@ export const createTask = (task: NewTask) =>
 
 export const updateTask = (id: number, changes: TaskChanges) =>
   request<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(changes) })
+
+export const retryIdentifySkills = (id: number) =>
+  request<Task>(`/tasks/${id}/identify-skills`, { method: 'POST' })

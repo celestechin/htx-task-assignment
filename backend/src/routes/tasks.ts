@@ -1,5 +1,11 @@
 import { Router } from 'express';
-import { createTask, getTask, listTasks, updateTask } from '../services/taskService';
+import {
+  createTask,
+  getTask,
+  listTasks,
+  retrySkillIdentification,
+  updateTask,
+} from '../services/taskService';
 import { createTaskBody, idParam, updateTaskBody } from '../validation';
 
 export const tasksRouter = Router();
@@ -22,4 +28,9 @@ tasksRouter.post('/', async (req, res) => {
 tasksRouter.patch('/:id', async (req, res) => {
   const id = idParam.parse(req.params.id);
   res.json(await updateTask(id, updateTaskBody.parse(req.body)));
+});
+
+// the retry link for tasks gemini couldn't identify skills for
+tasksRouter.post('/:id/identify-skills', async (req, res) => {
+  res.json(await retrySkillIdentification(idParam.parse(req.params.id)));
 });
