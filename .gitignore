@@ -1,0 +1,10 @@
+node_modules/
+dist/
+
+# Secrets: only .env.example belongs in Git
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
