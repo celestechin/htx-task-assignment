@@ -237,10 +237,22 @@ export async function updateTask(id: number, { status, assigneeId }: UpdateTaskI
     const parent = await client.query('SELECT status FROM tasks WHERE id = $1 FOR SHARE', [
       task.rows[0].parent_id,
     ]);
-    await client.query('SELECT id FROM tasks WHERE id = $1 FOR UPDATE', [id]);
+    // FOR UPDATE = anyone else changing this task waits for us
+    const locked = await client.query('SELECT assignee_id FROM tasks WHERE id = $1 FOR UPDATE', [
+      id,
+    ]);
 
     // status changes: needs an assignee first, then the done rules for subtasks
     if (status !== undefined) {
+      // a request can assign and change status together, so check the assignee it will end up with
+      const assigneeAfterUpdate = assigneeId === undefined ? locked.rows[0].assignee_id : assigneeId;
+      if (assigneeAfterUpdate === null) {
+        throw new ApiError(
+          422,
+          'TASK_NOT_ASSIGNED',
+          'Please assign this task to a developer before changing its status',
+        );
+      }
       await assertStatusChangeAllowed(client, id, status, parent.rows[0]?.status);
     }
 

@@ -113,10 +113,11 @@ describe('when the LLM fails', () => {
     expect(response.body.error.code).toBe('SKILLS_NOT_IDENTIFIED');
   });
 
-  it('still allows status changes', async () => {
+  it('blocks status changes too, since the task cannot be assigned yet', async () => {
     const task = await createPendingTask();
     const response = await request(app).patch(`/api/tasks/${task.id}`).send({ status: 'Done' });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe('TASK_NOT_ASSIGNED');
   });
 
   it('allows assignment after a successful retry', async () => {

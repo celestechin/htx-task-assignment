@@ -3,7 +3,12 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createTask, getSkills } from '../api'
 import TaskFormNode from '../components/TaskFormNode'
-import { newTaskDraft, toNewTask } from '../taskDraft'
+import { newTaskDraft, toNewTask, type TaskDraft } from '../taskDraft'
+
+// subtasks at every level, for the save button's text
+function countSubtasks(task: TaskDraft): number {
+  return task.subtasks.reduce((total, subtask) => total + 1 + countSubtasks(subtask), 0)
+}
 
 // part 3 + 4.3: create a task and any number of nested subtasks
 export default function CreateTaskPage() {
@@ -22,6 +27,8 @@ export default function CreateTaskPage() {
       navigate('/')
     },
   })
+
+  const subtaskCount = countSubtasks(task)
 
   function handleSubmit(event: FormEvent) {
     // stop the browser's normal submit, which would reload the page
@@ -49,13 +56,20 @@ export default function CreateTaskPage() {
         {/* the top task, its subtasks are drawn inside it */}
         <TaskFormNode task={task} number="1" skills={skills.data ?? []} onChange={setTask} />
 
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-3">
+          {subtaskCount > 0 && (
+            <p className="text-sm text-slate-500">The task and all its subtasks are saved together.</p>
+          )}
           <button
             type="submit"
             disabled={create.isPending}
             className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
           >
-            {create.isPending ? 'Saving...' : 'Save'}
+            {create.isPending
+              ? 'Saving...'
+              : subtaskCount > 0
+                ? `Save task and ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`
+                : 'Save task'}
           </button>
         </div>
       </form>

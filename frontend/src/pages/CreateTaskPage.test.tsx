@@ -8,11 +8,14 @@ import CreateTaskPage from './CreateTaskPage'
 
 vi.mock('../api', () => ({ createTask: vi.fn(), getSkills: vi.fn() }))
 
-const task = (number: string) =>
-  screen.getByLabelText(`Task ${number} title`).closest('div.rounded-lg') as HTMLElement
+const nameOf = (number: string) => (number === '1' ? 'Task 1' : `Subtask ${number}`)
 
-const addSubtaskTo = (number: string) =>
-  userEvent.click(within(task(number)).getByRole('button', { name: 'Add Subtask' }))
+const titleBox = (number: string) => screen.getByLabelText(`${nameOf(number)} Title`)
+const queryTitleBox = (number: string) => screen.queryByLabelText(`${nameOf(number)} Title`)
+const card = (number: string) => titleBox(number).closest('div.rounded-lg') as HTMLElement
+
+const addSubtaskUnder = (number: string) =>
+  userEvent.click(screen.getByRole('button', { name: `Add subtask under ${number}` }))
 
 async function renderPage() {
   render(
@@ -39,34 +42,46 @@ describe('CreateTaskPage', () => {
   it('starts with one task and no subtasks', async () => {
     await renderPage()
 
-    expect(screen.getByLabelText('Task 1 title')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Task 1.1 title')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
+    expect(titleBox('1')).toBeInTheDocument()
+    expect(queryTitleBox('1.1')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save task' })).toBeInTheDocument()
   })
 
   it('numbers subtasks and nested subtasks like the wireframe', async () => {
     await renderPage()
 
-    await addSubtaskTo('1')
-    await addSubtaskTo('1.1')
-    await addSubtaskTo('1.1')
+    await addSubtaskUnder('1')
+    await addSubtaskUnder('1.1')
+    await addSubtaskUnder('1.1')
 
-    expect(screen.getByLabelText('Task 1.1 title')).toBeInTheDocument()
-    expect(screen.getByLabelText('Task 1.1.1 title')).toBeInTheDocument()
-    expect(screen.getByLabelText('Task 1.1.2 title')).toBeInTheDocument()
+    expect(titleBox('1.1')).toBeInTheDocument()
+    expect(titleBox('1.1.1')).toBeInTheDocument()
+    expect(titleBox('1.1.2')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Subtask 1.1.2' })).toBeInTheDocument()
+  })
+
+  it('says how many tasks the Save button will save', async () => {
+    await renderPage()
+
+    await addSubtaskUnder('1')
+    expect(screen.getByRole('button', { name: 'Save task and 1 subtask' })).toBeInTheDocument()
+
+    await addSubtaskUnder('1.1')
+    expect(screen.getByRole('button', { name: 'Save task and 2 subtasks' })).toBeInTheDocument()
   })
 
   it('submits the whole tree without the React keys', async () => {
     const user = userEvent.setup()
     await renderPage()
 
-    await addSubtaskTo('1')
-    await addSubtaskTo('1.1')
-    await user.type(screen.getByLabelText('Task 1 title'), 'Parent')
-    await user.type(screen.getByLabelText('Task 1.1 title'), 'Child')
-    await user.type(screen.getByLabelText('Task 1.1.1 title'), 'Grandchild')
-    await user.click(within(task('1.1')).getByRole('checkbox', { name: 'Backend' }))
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await addSubtaskUnder('1')
+    await addSubtaskUnder('1.1')
+    await user.type(titleBox('1'), 'Parent')
+    await user.type(titleBox('1.1'), 'Child')
+    await user.type(titleBox('1.1.1'), 'Grandchild')
+    await user.click(within(card('1.1')).getByRole('checkbox', { name: 'Backend' }))
+    await user.click(screen.getByRole('button', { name: /^Save task/ }))
 
     expect(vi.mocked(createTask).mock.calls[0][0]).toEqual({
       title: 'Parent',
@@ -85,15 +100,15 @@ describe('CreateTaskPage', () => {
     const user = userEvent.setup()
     await renderPage()
 
-    await addSubtaskTo('1')
-    await addSubtaskTo('1')
-    await addSubtaskTo('1.1')
-    await user.type(screen.getByLabelText('Task 1.2 title'), 'Keep me')
-    await user.click(within(task('1.1')).getByRole('button', { name: 'Remove' }))
+    await addSubtaskUnder('1')
+    await addSubtaskUnder('1')
+    await addSubtaskUnder('1.1')
+    await user.type(titleBox('1.2'), 'Keep me')
+    await user.click(screen.getByRole('button', { name: 'Remove Subtask 1.1' }))
 
-    expect(screen.queryByLabelText('Task 1.1.1 title')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Task 1.2 title')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Task 1.1 title')).toHaveValue('Keep me')
+    expect(queryTitleBox('1.1.1')).not.toBeInTheDocument()
+    expect(queryTitleBox('1.2')).not.toBeInTheDocument()
+    expect(titleBox('1.1')).toHaveValue('Keep me')
   })
 
   it('stops offering subtasks at the tenth level', async () => {
@@ -101,12 +116,13 @@ describe('CreateTaskPage', () => {
 
     let number = '1'
     for (let level = 1; level < 10; level++) {
-      await addSubtaskTo(number)
+      await addSubtaskUnder(number)
       number += '.1'
     }
 
+    expect(titleBox(number)).toBeInTheDocument()
     expect(
-      within(task(number)).queryByRole('button', { name: 'Add Subtask' }),
+      screen.queryByRole('button', { name: `Add subtask under ${number}` }),
     ).not.toBeInTheDocument()
   })
 
@@ -115,10 +131,10 @@ describe('CreateTaskPage', () => {
     vi.mocked(createTask).mockRejectedValue(new Error('Title is required'))
     await renderPage()
 
-    await user.type(screen.getByLabelText('Task 1 title'), 'Parent')
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.type(titleBox('1'), 'Parent')
+    await user.click(screen.getByRole('button', { name: 'Save task' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Title is required')
-    expect(screen.getByLabelText('Task 1 title')).toHaveValue('Parent')
+    expect(titleBox('1')).toHaveValue('Parent')
   })
 })

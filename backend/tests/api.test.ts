@@ -151,6 +151,35 @@ describe('PATCH /api/tasks/:id', () => {
     expect(unassigned.body).toMatchObject({ status: 'In Progress', assignee: null });
   });
 
+  it('rejects a status change on an unassigned task', async () => {
+    const task = await createTask([frontend]);
+    const response = await request(app).patch(`/api/tasks/${task.id}`).send({ status: 'Done' });
+
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe('TASK_NOT_ASSIGNED');
+    expect((await request(app).get(`/api/tasks/${task.id}`)).body.status).toBe('To-do');
+  });
+
+  it('allows assigning and changing status in one request', async () => {
+    const task = await createTask([frontend]);
+    const response = await request(app)
+      .patch(`/api/tasks/${task.id}`)
+      .send({ assigneeId: alice, status: 'In Progress' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ status: 'In Progress', assignee: { id: alice } });
+  });
+
+  it('rejects unassigning and changing status in one request', async () => {
+    const task = await createTask([frontend]);
+    const url = `/api/tasks/${task.id}`;
+    await request(app).patch(url).send({ assigneeId: alice });
+
+    const response = await request(app).patch(url).send({ assigneeId: null, status: 'Done' });
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe('TASK_NOT_ASSIGNED');
+  });
+
   it('rejects an unknown status, an empty body and unknown fields', async () => {
     const task = await createTask([frontend]);
     const url = `/api/tasks/${task.id}`;

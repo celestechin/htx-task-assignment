@@ -78,10 +78,12 @@ Inside Docker, `DATABASE_URL` and `PORT` are set by `docker-compose.yml` and ove
 
 - **Tasks** (`/`) lists every task with its skills, status and assignee. Subtasks are indented
   under their parent. Status and assignee are changed straight from the dropdowns. The assignee
-  dropdown only offers developers who have **every** skill the task requires.
-- **Create Task** (`/tasks/new`) has a form for a task. **Add Subtask** adds a nested subtask
-  form, which can have subtasks of its own (numbered 1, 1.1, 1.1.1, ...). Leave the skill
-  checkboxes empty to let the LLM pick the skills.
+  dropdown only offers developers who have **every** skill the task requires. Changing the
+  status of an unassigned task shows a popup asking you to assign it first.
+- **Create Task** (`/tasks/new`) has a form for a task. **+ Add subtask under 1** adds a nested
+  subtask form below it, which can have subtasks of its own (numbered 1.1, 1.1.1, ...). Leave
+  the skill checkboxes empty to let the LLM pick the skills. The Save button says how many tasks
+  it will save, and the whole tree is saved together.
 
 The seed data adds the developers and skills from the requirements, plus the three example tasks
 from the wireframe so the list is not empty on first start.
@@ -132,6 +134,7 @@ visible and prevents SQL injection.
 | `src/pages/TaskListPage.tsx` | Task list with status and assignee dropdowns |
 | `src/pages/CreateTaskPage.tsx` | Task creation form |
 | `src/components/TaskFormNode.tsx` | One task's form fields; renders itself again for each subtask |
+| `src/components/NoticeDialog.tsx` | Popup message, built on the browser's `<dialog>` element |
 | `src/taskDraft.ts` | The unsaved form tree and its conversion to the API format |
 
 Server data is loaded and refreshed with TanStack Query. After a change, the task list is
@@ -267,53 +270,62 @@ Validation errors also include `details`, a list of `{ field, message }`.
 
 | Status | Codes | When |
 |---|---|---|
-| 400 | `VALIDATION_ERROR`, `BAD_REQUEST`, `UNKNOWN_SKILL`, `UNKNOWN_DEVELOPER` | Invalid input |
-| 404 | `TASK_NOT_FOUND`, `DEVELOPER_NOT_FOUND`, `SKILL_NOT_FOUND`, `NOT_FOUND` | The record or route does not exist |
-| 422 | `DEVELOPER_MISSING_SKILLS`, `SKILLS_NOT_IDENTIFIED`, `SUBTASKS_NOT_DONE`, `PARENT_TASK_DONE` | The request is valid but a business rule refuses it |
-| 502 | `SKILL_IDENTIFICATION_FAILED` | A retry of LLM skill identification failed |
-| 500 | `INTERNAL_ERROR` | Unexpected error (details are logged on the server only) |
+| 400 | `VALIDATION_ERROR`, `BAD_REQUEST`, `UNKNOWN_SKILL`, `UNKNOWN_DEVELOPER` | The input is wrong |
+| 404 | `TASK_NOT_FOUND`, `DEVELOPER_NOT_FOUND`, `SKILL_NOT_FOUND`, `NOT_FOUND` | The record or route doesn't exist |
+| 422 | `DEVELOPER_MISSING_SKILLS`, `SKILLS_NOT_IDENTIFIED`, `TASK_NOT_ASSIGNED`, `SUBTASKS_NOT_DONE`, `PARENT_TASK_DONE` | The request is fine but a business rule says no |
+| 502 | `SKILL_IDENTIFICATION_FAILED` | Retrying Gemini failed again |
+| 500 | `INTERNAL_ERROR` | Something unexpected (details only go to the server log) |
 
 ## Business rules
 
-All rules are enforced by the backend. The frontend also helps the user (for example by only
-listing eligible developers), but the backend never relies on it.
+The backend enforces every rule. The frontend helps too (for example by only listing developers
+who qualify), but I never rely on it, since anyone can call the API directly.
 
-1. **A task can only be assigned to a developer who has every skill it requires.** A task that
-   needs Frontend and Backend can only go to Carol.
-2. **A task can only be set to Done when all its subtasks are Done.**
-3. **A subtask cannot be moved out of Done while its parent is Done.** The parent must be
-   reopened first. Together with rule 2, this keeps a simple guarantee: a Done task only ever
-   has Done subtasks, so checking a task's direct subtasks is enough.
-4. **A task whose skills could not be identified cannot be assigned**, because a task with no
-   skills would otherwise match every developer.
+1. **A task can only go to a developer who has every skill it needs.** A Frontend + Backend task
+   can only go to Carol.
+2. **A task can only be Done once all its subtasks are Done.**
+3. **A subtask can't be reopened while its parent is Done.** You reopen the parent first.
+   Together with rule 2, this keeps one simple promise: a Done task only ever has Done subtasks,
+   so checking a task's direct subtasks is always enough.
+4. **A task whose skills couldn't be identified can't be assigned.** With no skills, it would
+   match every developer.
+5. **A task's status can only change once someone is assigned.** Work should belong to someone
+   before it moves. Assigning and changing status in the same request is fine.
 
-### Simultaneous requests
+### Two requests at the same time
 
-Rules 2 and 3 involve two rows (a task and its parent or subtasks), so two requests arriving at
-the same moment could each pass their check and together break the rule. Updates run in a
-transaction and lock the rows they read (`SELECT ... FOR UPDATE` / `FOR SHARE`). Every request
-locks the parent before the child, so requests cannot wait on each other forever (deadlock).
-A test fires both requests at once 40 times; with the locks removed, that test fails.
+Rules 2 and 3 involve two rows (a task and its parent or subtasks). If two requests landed at
+the same moment, each could pass its check and together they'd break the rule. To stop that,
+updates run in a transaction and lock the rows they read (`SELECT ... FOR UPDATE` /
+`FOR SHARE`). Every request locks the parent before the child, so two requests can never end up
+waiting on each other forever (a deadlock).
 
-## LLM skill identification
+There's a test that fires both requests at once, 40 times over. When I took the locks out, it
+failed, which is how I know it's actually testing something.
 
-When a task or subtask is created without skills, the backend asks Gemini to choose them from
-the title. The user does not trigger this.
+This was the part I had to think hardest about. It's easy to overlook, but it becomes a real
+problem as soon as several people use the app at once. Locking the rows in a fixed order
+(parent first, then child) turned out to be a small change that closes the gap completely.
 
-- **One call per task tree.** All titles that need skills are sent in one request, so a task
-  with many subtasks uses a single API call.
-- **The answer is constrained.** Gemini is asked for JSON that follows a schema whose skill
-  values are limited to the skills in the database. The answer is then validated again with Zod
-  (one result per title, at least one known skill each) before it is used.
-- **Prompt.** The prompt explains what each skill covers, includes the three examples from the
-  requirements, and tells the model to treat titles as data and ignore instructions inside them.
-- **Outside the transaction.** The LLM call happens before the database transaction opens, so a
-  slow response never holds a database connection.
-- **Failure handling.** Each call has a 10 second timeout and is retried once. If it still fails,
-  the task is saved anyway with `skillsPending: true` (losing what the user typed would be
-  worse), assignment is blocked, and the task list shows a **Retry** link.
+## How the LLM part works
 
-Check the three examples from the requirements against the real API:
+When a task or subtask is created without skills, the backend asks Gemini to pick them from the
+title. The user doesn't have to press anything.
+
+- **One call per task tree.** All the titles that need skills go in one request, so a task with
+  lots of subtasks still costs one API call.
+- **Answers are restricted.** Gemini has to reply in a fixed JSON shape where the skill values
+  can only be skills from the database. I then check the answer again with Zod (one result per
+  title, at least one real skill each) before using it.
+- **The prompt** explains what each skill covers, includes the three examples from the brief,
+  and tells the model to treat titles as data and ignore any instructions inside them.
+- **Outside the transaction.** The Gemini call happens before the database transaction opens,
+  so a slow reply never ties up a database connection.
+- **When it fails.** Each call times out after 10 seconds and gets one retry. If it still fails,
+  the task is saved anyway with `skillsPending: true`, because losing what the user typed felt
+  worse than missing skills. Assignment is blocked until the **Retry** link on the task works.
+
+To check the three examples from the brief against the real API:
 
 ```bash
 cd backend
@@ -324,8 +336,8 @@ npm run llm:check
 
 | Suite | Command | What it covers |
 |---|---|---|
-| Backend (55 tests) | `cd backend && npm test` | Every endpoint against a real PostgreSQL database, all business rules, simultaneous updates, LLM answer validation, and LLM failure handling |
-| Frontend (6 tests) | `cd frontend && npm test` | The recursive subtask form: numbering, nesting, removing, depth limit, the request it sends, and error display |
+| Backend (58 tests) | `cd backend && npm test` | Every endpoint against a real PostgreSQL database, all business rules, simultaneous updates, LLM answer validation, and LLM failure handling |
+| Frontend (9 tests) | `cd frontend && npm test` | The recursive subtask form (numbering, nesting, removing, depth limit, Save label, the request it sends, error display) and the "assign first" popup on the task list |
 
 The LLM is replaced with a fake in automated tests so they are fast and free. Backend tests need
 PostgreSQL on `localhost:5432` (see below); they create and use a separate
@@ -395,6 +407,8 @@ The brief allows assumptions where details are not specified. These were made:
 - **Subtasks are created together with their parent** on the creation page, as the brief
   describes. There is no endpoint to add a subtask to an existing task later.
 - **New tasks start as To-do and unassigned.**
+- **Status changes need an assignee.** This is a deliberate extra rule (see Business rules).
+  The brief's requirement that status can be changed still holds once a task is assigned.
 - **A Done task's subtasks cannot be reopened** until the parent is reopened (see Business rules).
 - **Nesting is limited** to 10 levels and 100 tasks per request, to protect the server from
   very large requests.

@@ -46,13 +46,30 @@ export default function TaskFormNode({
 
   // ids from the key so each label points at the right input
   const titleId = `task-title-${task.key}`
+  // number comes from the parent, e.g. "1.1" passes "1.1.2" to its second child
+  const name = depth === 1 ? `Task ${number}` : `Subtask ${number}`
+  const canAddSubtask = depth < MAX_DEPTH
 
   return (
     <div>
       <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">{name}</h2>
+          {onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              aria-label={`Remove ${name}`}
+              className="rounded-md px-2 py-1 text-sm text-red-700 hover:bg-red-50"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+
         <div>
           <label htmlFor={titleId} className="mb-1 block text-sm font-medium">
-            Task {number} title
+            <span className="sr-only">{name} </span>Title
           </label>
           <textarea
             id={titleId}
@@ -66,7 +83,9 @@ export default function TaskFormNode({
         </div>
 
         <fieldset>
-          <legend className="text-sm font-medium">Task {number} required skills</legend>
+          <legend className="text-sm font-medium">
+            <span className="sr-only">{name} </span>Required skills
+          </legend>
           <p className="mb-1 text-xs text-slate-500">
             Leave these empty and AI will identify the skills from the title.
           </p>
@@ -83,31 +102,12 @@ export default function TaskFormNode({
             ))}
           </div>
         </fieldset>
-
-        <div className="flex justify-end gap-2">
-          {onRemove && (
-            <button
-              type="button"
-              onClick={onRemove}
-              className="rounded-md px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
-            >
-              Remove
-            </button>
-          )}
-          {depth < MAX_DEPTH && (
-            <button
-              type="button"
-              onClick={() => onChange({ ...task, subtasks: [...task.subtasks, newTaskDraft()] })}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
-            >
-              Add Subtask
-            </button>
-          )}
-        </div>
       </div>
 
-      {task.subtasks.length > 0 && (
-        <div className="mt-3 ml-3 space-y-3 sm:ml-6">
+      {/* Subtasks sit under their parent, joined by a line, with the button to add another
+          at the end of the list, so it reads as "add one more here", not "save". */}
+      {(task.subtasks.length > 0 || canAddSubtask) && (
+        <div className="mt-3 ml-3 space-y-3 border-l-2 border-slate-200 pl-3 sm:ml-5 sm:pl-5">
           {task.subtasks.map((subtask, index) => (
             <TaskFormNode
               key={subtask.key}
@@ -119,6 +119,15 @@ export default function TaskFormNode({
               onRemove={() => removeSubtask(subtask.key)}
             />
           ))}
+          {canAddSubtask && (
+            <button
+              type="button"
+              onClick={() => onChange({ ...task, subtasks: [...task.subtasks, newTaskDraft()] })}
+              className="w-full rounded-lg border border-dashed border-slate-300 px-3 py-2 text-left text-sm text-slate-600 hover:border-slate-400 hover:bg-white"
+            >
+              <span aria-hidden="true">+ </span>Add subtask under {number}
+            </button>
+          )}
         </div>
       )}
     </div>

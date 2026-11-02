@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   getDevelopers,
@@ -11,6 +12,7 @@ import {
   type TaskChanges,
   type TaskStatus,
 } from '../api'
+import NoticeDialog from '../components/NoticeDialog'
 
 const selectClass =
   'w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm disabled:opacity-50'
@@ -36,6 +38,7 @@ export default function TaskListPage() {
   const queryClient = useQueryClient()
   const tasks = useQuery({ queryKey: ['tasks'], queryFn: getTasks })
   const developers = useQuery({ queryKey: ['developers'], queryFn: getDevelopers })
+  const [notice, setNotice] = useState<string | null>(null)
 
   const update = useMutation({
     mutationFn: ({ id, changes }: { id: number; changes: TaskChanges }) =>
@@ -63,6 +66,8 @@ export default function TaskListPage() {
   return (
     <>
       <h1 className="mb-4 text-2xl font-semibold">Tasks</h1>
+      {/* popups live at page level, cards just ask for them to open */}
+      <NoticeDialog message={notice} onClose={() => setNotice(null)} />
 
       {(update.isError || retrySkills.isError) && (
         <p role="alert" className="mb-4 rounded-md bg-red-100 px-3 py-2 text-sm text-red-800">
@@ -125,12 +130,19 @@ export default function TaskListPage() {
                         className={selectClass}
                         disabled={isSaving}
                         value={task.status}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          // dropdown keeps showing the saved status since nothing changed
+                          if (!task.assignee) {
+                            setNotice(
+                              'Please assign this task to a developer before changing its status.',
+                            )
+                            return
+                          }
                           update.mutate({
                             id: task.id,
                             changes: { status: event.target.value as TaskStatus },
                           })
-                        }
+                        }}
                       >
                         {TASK_STATUSES.map((status) => (
                           <option key={status} value={status}>

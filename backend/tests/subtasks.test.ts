@@ -15,6 +15,11 @@ afterAll(async () => {
   await pool.end();
 });
 
+// status changes need an assignee, carol has every skill so she can take any task
+async function assignEveryTaskToCarol() {
+  await pool.query(`UPDATE tasks SET assignee_id = (SELECT id FROM developers WHERE name = 'Carol')`);
+}
+
 async function createTree() {
   const response = await request(app)
     .post('/api/tasks')
@@ -26,6 +31,7 @@ async function createTree() {
       ],
     });
   expect(response.status).toBe(201);
+  await assignEveryTaskToCarol();
 
   const parent = response.body;
   const child1 = parent.subtasks[0];
@@ -203,6 +209,7 @@ describe('the Done rule', () => {
         .send({ title: 'Parent', subtasks: [{ title: 'Child' }] })
     ).body;
     const child = parent.subtasks[0];
+    await assignEveryTaskToCarol();
 
     for (let round = 0; round < 40; round++) {
       await setStatus(parent.id, 'To-do');
