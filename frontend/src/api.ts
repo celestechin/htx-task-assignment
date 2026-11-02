@@ -17,14 +17,17 @@ export interface Task {
   id: number
   title: string
   status: TaskStatus
+  parentId: number | null
   skills: Skill[]
   assignee: { id: number; name: string } | null
+  subtasks: Task[]
 }
 
 // what we send to create a task, empty skillIds = let gemini pick
 export interface NewTask {
   title: string
   skillIds: number[]
+  subtasks: NewTask[]
 }
 
 // only the fields being changed get sent

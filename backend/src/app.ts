@@ -7,7 +7,8 @@ import { tasksRouter } from './routes/tasks';
 
 export const app = express();
 
-app.use(express.json());
+// read json request bodies, raised from the 100kb default so big subtask trees still fit
+app.use(express.json({ limit: '1mb' }));
 
 // check if API is ready, docker uses this before starting the frontend
 app.get('/health', async (_req, res) => {

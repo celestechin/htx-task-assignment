@@ -21,6 +21,14 @@ function isEligible(developer: Developer, task: Task) {
   )
 }
 
+// each task goes right after its parent, depth is used for the indent
+function flattenTasks(tasks: Task[], depth = 0): { task: Task; depth: number }[] {
+  return tasks.flatMap((task) => [
+    { task, depth },
+    ...flattenTasks(task.subtasks, depth + 1),
+  ])
+}
+
 // the main page: filters, task cards and the popups
 export default function TaskListPage() {
   // load data
@@ -76,11 +84,16 @@ export default function TaskListPage() {
               </tr>
             </thead>
             <tbody>
-              {tasks.data.map((task) => {
+              {flattenTasks(tasks.data).map(({ task, depth }) => {
                 const isSaving = update.isPending && update.variables.id === task.id
                 return (
                   <tr key={task.id} className="border-b border-slate-100 last:border-0">
-                    <td className="px-4 py-3 align-top">{task.title}</td>
+                    <td
+                      className="px-4 py-3 align-top"
+                      style={{ paddingLeft: `${1 + depth * 1.5}rem` }}
+                    >
+                      {task.title}
+                    </td>
                     <td className="px-4 py-3 align-top text-slate-600">
                       {task.skills.map((skill) => skill.name).join(', ')}
                     </td>
