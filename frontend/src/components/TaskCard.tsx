@@ -35,7 +35,7 @@ export default function TaskCard({ item, depth = 0, ...actions }: TaskCardProps)
   const progress = subtaskProgress(task)
 
   return (
-    <li>
+    <li className="relative has-[[aria-expanded=true]]:z-30">
       {/* left border colour = priority, faded = only shown because a subtask matched the filter */}
       <article
         aria-label={task.title}

@@ -87,7 +87,7 @@ describe('CreateTaskPage', () => {
     await user.type(titleBox('1.1.1'), 'Grandchild')
     await user.click(within(card('1.1')).getByRole('checkbox', { name: 'Backend' }))
     await user.click(within(card('1.1')).getByRole('radio', { name: 'High' }))
-    await user.type(screen.getByLabelText('Subtask 1.1 Due date'), '2026-12-01')
+    await user.type(screen.getByLabelText('Subtask 1.1 Due date'), '01/12/2026')
     await user.click(screen.getByRole('button', { name: /^Save task/ }))
 
     expect(vi.mocked(createTask).mock.calls[0][0]).toEqual({

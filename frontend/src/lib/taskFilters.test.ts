@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from '../api'
-import { dueState, formatDueDate, todayString } from './dates'
+import {
+  dueState,
+  formatDayMonthYear,
+  formatDueDate,
+  parseDayMonthYear,
+  todayString,
+} from './dates'
 import { countMatches, filterTasks, NO_FILTERS, subtaskProgress } from './taskFilters'
 
 const TODAY = '2026-11-02'
@@ -35,9 +41,20 @@ describe('dueState', () => {
     expect(dueState(dueDate, status, TODAY)).toBe(expected)
   })
 
-  it('names today and tomorrow', () => {
+  it('names today and tomorrow, and shows other dates day first', () => {
     expect(formatDueDate('2026-11-02', TODAY)).toBe('Today')
     expect(formatDueDate('2026-11-03', TODAY)).toBe('Tomorrow')
+    expect(formatDueDate('2026-11-04', TODAY)).toBe('4 Nov')
+    expect(formatDueDate('2027-01-15', TODAY)).toBe('15 Jan 2027')
+  })
+
+  it('converts between DD/MM/YYYY and the API format', () => {
+    expect(formatDayMonthYear('2026-11-04')).toBe('04/11/2026')
+    expect(parseDayMonthYear('04/11/2026')).toBe('2026-11-04')
+    expect(parseDayMonthYear('4/11/2026')).toBe('2026-11-04')
+    expect(parseDayMonthYear('31/02/2026')).toBeNull()
+    expect(parseDayMonthYear('2026-11-04')).toBeNull()
+    expect(parseDayMonthYear('04/11')).toBeNull()
   })
 
   it('formats today in local time', () => {

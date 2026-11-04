@@ -1,5 +1,6 @@
 import type { Skill } from '../api'
 import { newTaskDraft, type TaskDraft } from '../taskDraft'
+import DateField from './DateField'
 import { PriorityChoice } from './PriorityPicker'
 
 // same limit as the backend, so the button disappears before the api would say no
@@ -119,12 +120,10 @@ export default function TaskFormNode({
             <label htmlFor={dueDateId} className="mb-1 block text-sm font-medium">
               <span className="sr-only">{name} </span>Due date
             </label>
-            <input
+            <DateField
               id={dueDateId}
-              type="date"
-              value={task.dueDate ?? ''}
-              onChange={(event) => onChange({ ...task, dueDate: event.target.value || null })}
-              className="rounded-xl border border-violet-100 px-3 py-1 text-sm"
+              value={task.dueDate}
+              onChange={(dueDate) => onChange({ ...task, dueDate })}
             />
           </div>
         </div>

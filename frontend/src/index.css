@@ -1,1 +1,12 @@
 @import 'tailwindcss';
+
+.calendar-pastel {
+  --rdp-accent-color: var(--color-violet-500);
+  --rdp-accent-background-color: var(--color-violet-100);
+  --rdp-today-color: var(--color-violet-600);
+  --rdp-day-height: 36px;
+  --rdp-day-width: 36px;
+  --rdp-day_button-height: 34px;
+  --rdp-day_button-width: 34px;
+  font-size: 0.875rem;
+}

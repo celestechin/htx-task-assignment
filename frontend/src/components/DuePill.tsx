@@ -1,7 +1,8 @@
 import { CalendarDays } from 'lucide-react'
-import { useRef } from 'react'
 import type { TaskStatus } from '../api'
-import { dueState, formatDueDate, type DueState } from '../lib/dates'
+import { dueState, formatDayMonthYear, formatDueDate, type DueState } from '../lib/dates'
+import { usePopover } from '../lib/usePopover'
+import Calendar from './Calendar'
 
 // colour coordinated pills based on due date
 const PILL_STYLES: Record<DueState, string> = {
@@ -21,8 +22,8 @@ interface DuePillProps {
   onChange: (dueDate: string | null) => void
 }
 
-// calendar pill, colour shows how close the due date is
-// click it to open the browser's date picker
+// clicking it opens a calendar to pick or clear the date
+// amber within 2 days, red when overdue, grey once done
 export default function DuePill({
   dueDate,
   status,
@@ -31,7 +32,7 @@ export default function DuePill({
   disabled = false,
   onChange,
 }: DuePillProps) {
-  const input = useRef<HTMLInputElement>(null)
+  const { open, setOpen, ref } = usePopover<HTMLDivElement>()
   const state = dueState(dueDate, status, today)
 
   let text = 'Add due date'
@@ -40,36 +41,46 @@ export default function DuePill({
     if (state === 'overdue') text = `Overdue · ${text}`
   }
 
-  function openPicker() {
-    try {
-      input.current?.showPicker()
-    } catch {
-      input.current?.focus()
-    }
+  function choose(isoDate: string | null) {
+    setOpen(false)
+    if (isoDate !== dueDate) onChange(isoDate)
   }
 
   return (
-    <span className="relative inline-flex">
+    <div ref={ref} className="relative">
       <button
         type="button"
         disabled={disabled}
-        onClick={openPicker}
-        aria-label={`${label}: ${dueDate ?? 'none'}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`${label}: ${dueDate ? formatDayMonthYear(dueDate) : 'none'}`}
+        onClick={() => setOpen(!open)}
         className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium hover:brightness-95 disabled:opacity-50 ${PILL_STYLES[state]}`}
       >
         <CalendarDays size={12} aria-hidden="true" />
         {text}
       </button>
-      {/* Hidden under the pill so the browser's picker opens next to it. */}
-      <input
-        ref={input}
-        type="date"
-        tabIndex={-1}
-        aria-hidden="true"
-        value={dueDate ?? ''}
-        onChange={(event) => onChange(event.target.value || null)}
-        className="pointer-events-none absolute inset-0 opacity-0"
-      />
-    </span>
+
+      {open && (
+        <div
+          role="dialog"
+          aria-label={label}
+          className="absolute top-full left-0 z-20 mt-2 rounded-2xl border border-violet-100 bg-white p-2 shadow-lg shadow-violet-200/50"
+        >
+          <Calendar value={dueDate} onSelect={choose} />
+          {dueDate && (
+            <div className="border-t border-violet-50 px-2 pt-2 text-right">
+              <button
+                type="button"
+                onClick={() => choose(null)}
+                className="text-xs font-medium text-violet-600 hover:text-violet-800"
+              >
+                Clear due date
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }

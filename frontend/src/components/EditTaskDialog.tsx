@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { updateTask, type Skill, type Task, type TaskChanges } from '../api'
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '../lib/styles'
+import DateField from './DateField'
 import Modal from './Modal'
 import { PriorityChoice } from './PriorityPicker'
 
@@ -33,7 +34,7 @@ function EditTaskForm({ task, skills, onClose }: { task: Task; skills: Skill[]; 
   const [title, setTitle] = useState(task.title)
   const [skillIds, setSkillIds] = useState(originalSkillIds)
   const [priority, setPriority] = useState(task.priority)
-  const [dueDate, setDueDate] = useState(task.dueDate ?? '')
+  const [dueDate, setDueDate] = useState(task.dueDate)
 
   const save = useMutation({
     mutationFn: (changes: TaskChanges) => updateTask(task.id, changes),
@@ -57,7 +58,7 @@ function EditTaskForm({ task, skills, onClose }: { task: Task; skills: Skill[]; 
     if (title.trim() !== task.title) changes.title = title
     if (!sameSkills(skillIds, originalSkillIds)) changes.skillIds = skillIds
     if (priority !== task.priority) changes.priority = priority
-    if ((dueDate || null) !== task.dueDate) changes.dueDate = dueDate || null
+    if (dueDate !== task.dueDate) changes.dueDate = dueDate
 
     if (Object.keys(changes).length === 0) {
       onClose()
@@ -122,24 +123,7 @@ function EditTaskForm({ task, skills, onClose }: { task: Task; skills: Skill[]; 
         <label htmlFor="edit-due-date" className="mb-1 block text-sm font-medium">
           Due date
         </label>
-        <div className="flex items-center gap-2">
-          <input
-            id="edit-due-date"
-            type="date"
-            value={dueDate}
-            onChange={(event) => setDueDate(event.target.value)}
-            className="rounded-xl border border-violet-100 px-3 py-1.5 text-sm"
-          />
-          {dueDate && (
-            <button
-              type="button"
-              onClick={() => setDueDate('')}
-              className="text-xs font-medium text-violet-600 hover:text-violet-800"
-            >
-              Clear
-            </button>
-          )}
-        </div>
+        <DateField id="edit-due-date" value={dueDate} onChange={setDueDate} />
       </div>
 
       <div className="flex justify-end gap-2">

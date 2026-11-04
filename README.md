@@ -56,51 +56,55 @@ with the Compose plugin v2.24 or newer (`docker compose version` shows it).
 
 3. Open **http://localhost:8080**
 
-The database is created, migrated and seeded automatically on first start. Data is kept in a
-Docker volume, so it survives restarts.
+That's it. The database gets created, migrated and seeded on the first start, and the data
+lives in a Docker volume so it's still there after a restart.
 
-To stop: `docker compose down`. To stop and delete all data: `docker compose down -v`.
+To stop it: `docker compose down`. To stop it and wipe the data: `docker compose down -v`.
 
-> **No API key?** The app still runs. Tasks created without skills are saved with their skills
-> marked as "Not identified" and cannot be assigned until skills are identified. Once a key is
-> added (and the backend restarted with `docker compose up -d`), use the **Retry** link on the
-> task list.
+> **No API key?** The app still runs. Tasks created without skills are saved, but their skills
+> show as "Not identified" and they can't be assigned yet. Add a key, restart with
+> `docker compose up -d`, and use the **Retry** link on the task.
 
 ## Configuration
 
-| Variable | Where | Purpose | Default |
+| Variable | Where | What it's for | Default |
 |---|---|---|---|
 | `GEMINI_API_KEY` | `backend/.env` | Gemini API key. Free keys: https://aistudio.google.com/apikey | none |
-| `GEMINI_MODEL` | `backend/.env` | Gemini model used for skill identification | `gemini-3.5-flash-lite` |
-| `APP_PORT` | shell or root `.env` | Port the app is served on | `8080` |
+| `GEMINI_MODEL` | `backend/.env` | Which Gemini model picks the skills | `gemini-3.5-flash-lite` |
+| `APP_PORT` | shell or root `.env` | Port the app runs on | `8080` |
 | `DATABASE_URL` | `backend/.env` | Only used when running the backend outside Docker | `localhost:5432` |
 
-Inside Docker, `DATABASE_URL` and `PORT` are set by `docker-compose.yml` and override
-`backend/.env`. `.env` files are ignored by Git, so keys never reach the repository.
+Inside Docker, `docker-compose.yml` sets `DATABASE_URL` and `PORT` itself, so they override
+whatever is in `backend/.env`. All `.env` files are ignored by Git, so the key never ends up in
+the repo.
 
 ## Using the app
 
-- **Tasks** (`/`) shows each task as a card, with its subtasks nested inside. On each card:
-  - **Priority pill** (High, Medium, Low), colour-coded with a flag icon. Click it to change it.
-  - **Skills.** Skills chosen by Gemini have a ✨ sparkle.
-  - **Due date pill.** Click it to pick a date. It turns amber when due within 2 days, red when
-    overdue, and grey once the task is Done.
-  - **Status dropdown.** Changing the status of an unassigned task shows a popup asking you to
-    assign it first.
-  - **Assignee avatar** with the developer's initials. Hover over it to see their full name and
-    skills; click it to pick from the developers who have **every** skill the task requires.
-  - **Progress bar** on tasks with subtasks, counting Done subtasks at every level.
-  - **⋯ menu** to edit (title, skills, priority, due date) or delete the task. Deleting asks for
-    confirmation and also deletes its subtasks.
-- **Search and quick filters** above the list: search titles, and toggle status, priority,
-  Unassigned, Overdue and Due soon. A parent stays visible (faded) when only its subtasks match.
-- **Create Task** (`/tasks/new`) has a form for a task, including priority and due date.
-  **+ Add subtask under 1** adds a nested subtask form below it, which can have subtasks of its
-  own (numbered 1.1, 1.1.1, ...). Leave the skill checkboxes empty to let the LLM pick the
-  skills. The Save button says how many tasks it will save, and the whole tree is saved together.
+**Tasks** (`/`) shows each task as a card, with its subtasks nested inside. On each card:
 
-The seed data adds the developers and skills from the requirements, plus the three example tasks
-from the wireframe so the list is not empty on first start.
+- **Priority pill** (High, Medium, Low) with a coloured flag. Click it to change it.
+- **Skills.** The ones Gemini picked have a ✨ next to them.
+- **Due date pill**, like "4 Nov". Click it to pick or clear a date. It turns amber when it's
+  due within 2 days, red when it's overdue, and grey once the task is Done. In the forms you
+  can type or pick dates as DD/MM/YYYY.
+- **Status dropdown.** If nobody's assigned yet, a popup asks you to assign someone first.
+- **Assignee avatar** with the developer's initials. Hover to see their name and skills, click
+  to choose from the developers who have **every** skill the task needs.
+- **Progress bar** on tasks that have subtasks, counting Done subtasks at every level.
+- **⋯ menu** to edit (title, skills, priority, due date) or delete. Deleting asks first, and
+  takes the subtasks with it.
+
+Above the list there's a **search box and quick filters** for status, priority, Unassigned,
+Overdue and Due soon. If only a subtask matches, its parent still shows (faded) so you can see
+where it belongs.
+
+**Create Task** (`/tasks/new`) is the form for a new task, including priority and due date.
+**+ Add subtask under 1** adds a subtask form underneath, and each subtask can have its own
+subtasks (1.1, 1.1.1, ...). Leave the skills unticked and Gemini picks them. The Save button
+tells you how many tasks it's about to save, and the whole tree is saved in one go.
+
+The seed data has the developers and skills from the brief, plus the three example tasks from
+the wireframe so the list isn't empty the first time you open it.
 
 | Developer | Skills |
 |---|---|
@@ -380,16 +384,16 @@ npm run llm:check
 
 | Suite | Command | What it covers |
 |---|---|---|
-| Backend (71 tests) | `cd backend && npm test` | Every endpoint against a real PostgreSQL database, all business rules, editing and deleting, simultaneous updates, LLM answer validation, and LLM failure handling |
-| Frontend (28 tests) | `cd frontend && npm test` | The recursive subtask form; the task list's popup, assignee menu, priority, progress, AI marker, filters, edit and delete; and the filter, progress and due-date logic |
+| Backend (71 tests) | `cd backend && npm test` | Every endpoint against a real PostgreSQL database, all the business rules, editing and deleting, simultaneous updates, checking Gemini's answers, and what happens when Gemini fails |
+| Frontend (31 tests) | `cd frontend && npm test` | The nested subtask form; the task list's popup, assignee menu, priority, progress, AI marker, filters, edit and delete; and the filter, progress and date logic |
 
-The LLM is replaced with a fake in automated tests so they are fast and free. Backend tests need
-PostgreSQL on `localhost:5432` (see below); they create and use a separate
-`task_assignment_test` database because they delete tasks between tests.
+In the automated tests Gemini is swapped for a fake, so they're quick and don't use up the free
+quota. The backend tests need PostgreSQL on `localhost:5432` (see below). They create their own
+`task_assignment_test` database, since they clear out tasks between tests.
 
 ## Running it without Docker
 
-Needs Node.js 22 or newer.
+You'll need Node.js 22 or newer.
 
 ```bash
 # 1. Start just the database, open on localhost:5432
@@ -409,62 +413,70 @@ npm ci
 npm run dev
 ```
 
-In development, Vite forwards `/api` to the backend on port 3000.
+In development, Vite passes `/api` calls on to the backend on port 3000.
 
-## Libraries and why they were chosen
+## Libraries I used and why
+
+I tried to keep the list short and only add a library when it saved real work.
 
 ### Backend
 
 | Library | Why |
 |---|---|
-| `express` | The most widely used Node.js web framework; small and well understood. Version 5 forwards errors from async route handlers automatically. |
-| `zod` | Validates request bodies and LLM answers at runtime. TypeScript types only exist at compile time, so untrusted input needs a runtime check. Its schemas also produce the TypeScript types. |
-| `pg` | The standard PostgreSQL driver. Queries are written in plain SQL, which keeps them readable and makes the recursive query and row locks straightforward. No ORM was needed. |
-| `node-pg-migrate` | Runs the versioned SQL migration files and records which ones have been applied. |
+| `express` | The most widely used Node.js web framework, small and well understood. Version 5 passes errors from async routes to the error handler on its own. |
+| `zod` | Checks request bodies and Gemini's answers while the app runs. TypeScript types disappear at runtime, so they can't protect the API from bad input by themselves. |
+| `pg` | The standard PostgreSQL driver. Plain SQL kept the recursive query and the row locks straightforward, so I didn't need an ORM. |
+| `node-pg-migrate` | Runs the SQL migration files in order and remembers which ones have run. |
 | `dotenv` | Loads `backend/.env` when running outside Docker. |
-| `typescript`, `tsx` | Type checking and compiling; `tsx` runs TypeScript directly during development. |
-| `vitest`, `supertest` | Test runner, and sending real HTTP requests to the app in tests. |
+| `typescript`, `tsx` | Type checking and compiling. `tsx` runs TypeScript directly while developing. |
+| `vitest`, `supertest` | The test runner, and sending real HTTP requests to the app in tests. |
 
-Gemini is called with the built-in `fetch` rather than an SDK, since only one endpoint is used.
+Gemini is called with the built-in `fetch` instead of an SDK, since I only needed one endpoint.
 
 ### Frontend
 
 | Library | Why |
 |---|---|
 | `react`, `react-dom` | Required by the brief. |
-| `vite`, `@vitejs/plugin-react` | Fast development server and production build for React and TypeScript. |
-| `react-router-dom` | Client-side routing between the two pages of the single-page app. |
-| `@tanstack/react-query` | Handles loading, error and refresh states for server data, which would otherwise need hand-written state in every page. |
-| `tailwindcss`, `@tailwindcss/vite` | Styling with utility classes in the markup, with no separate CSS files to maintain. |
-| `lucide-react` | Small, consistent icons (flags, calendar, sparkle, menu). Each icon is its own component, so only the icons used end up in the build. |
-| `vitest`, `jsdom`, `@testing-library/*` | Component tests that use the form the way a user would. |
-| `oxlint` | Linting, included by the Vite template. |
+| `vite`, `@vitejs/plugin-react` | Fast dev server and production build for React and TypeScript. |
+| `react-router-dom` | Switching between the two pages without reloading. |
+| `@tanstack/react-query` | Handles loading, error and refresh states for server data, which I'd otherwise have to hand-write on every page. |
+| `tailwindcss`, `@tailwindcss/vite` | Styling with classes right in the markup, no separate CSS files to keep in sync. |
+| `lucide-react` | Small, consistent icons (flags, calendar, sparkle, menu). Only the icons I use end up in the build. |
+| `react-day-picker` | The due date calendar. The browser's own date input follows the computer's date format, so a custom calendar was the only way to show DD/MM/YYYY for everyone. |
+| `vitest`, `jsdom`, `@testing-library/*` | Component tests that use the pages the way a person would. |
+| `oxlint` | Linting, came with the Vite template. |
 
 ## Assumptions
 
-The brief allows assumptions where details are not specified. These were made:
+The brief says I can make assumptions where something isn't specified. These are the ones I
+made:
 
-- **Statuses** are `To-do`, `In Progress` and `Done` ("etc." in the brief).
-- **A task has at most one assignee** and can be unassigned.
-- **"Has the required skills" means all of them**, not any one.
-- **Subtasks have their own skills and assignee**, independent of their parent ("same properties
+- **Statuses** are `To-do`, `In Progress` and `Done` (the brief says "etc.").
+- **A task has at most one assignee**, and can be unassigned.
+- **"Has the required skills" means all of them**, not just one.
+- **Subtasks have their own skills and assignee**, separate from their parent ("same properties
   as a Task").
-- **Subtasks are created together with their parent** on the creation page, as the brief
-  describes. There is no endpoint to add a subtask to an existing task later.
+- **Subtasks are created together with their parent** on the create page, like the brief
+  describes. There's no way to add a subtask to an existing task later.
 - **New tasks start as To-do and unassigned.**
-- **Status changes need an assignee.** This is a deliberate extra rule (see Business rules).
-  The brief's requirement that status can be changed still holds once a task is assigned.
-- **A Done task's subtasks cannot be reopened** until the parent is reopened (see Business rules).
-- **Nesting is limited** to 10 levels and 100 tasks per request, to protect the server from
-  very large requests.
-- **Editing** covers the title, skills, priority and due date. Skills cannot be emptied while
-  editing; leaving them empty for the LLM to fill in is only offered when creating a task.
+- **Status changes need an assignee.** This is an extra rule I chose on purpose (see Business
+  rules). Status can still be changed, as the brief asks, once the task is assigned.
+- **A Done task's subtasks can't be reopened** until the parent is reopened (see Business rules).
+- **Nesting is capped** at 10 levels and 100 tasks per request, so one request can't overload
+  the server.
+- **Editing** covers title, skills, priority and due date. Skills can't be emptied while editing;
+  leaving them for Gemini is only an option when creating.
 - **Deleting a task deletes its subtasks too.**
-- **Subtasks cannot be moved** to another parent after creation.
-- **Avatars show initials**, since developers have no profile pictures in the data.
-- **The three wireframe tasks are seeded as demo data** in addition to the required developers
-  and skills, with sample priorities and due dates set relative to the day the seed runs.
-- **No authentication**, since the brief does not mention users or login.
+- **Subtasks can't be moved** to a different parent after they're created.
+- **Avatars show initials**, since there are no profile pictures in the data.
+- **Only the two skills from the brief are seeded.** Nothing in the code is tied to them though:
+  adding a skill is one row in the `skills` table, and Gemini always gets the current list. I
+  tried it with four skills (Frontend, Backend, Creative Writing, Data Entry) and it put "Write
+  the copy for the onboarding emails" under Creative Writing.
+- **The three wireframe tasks are seeded as demo data** on top of the required developers and
+  skills, with sample priorities and due dates counted from the day the seed runs.
+- **No login**, since the brief doesn't mention users.
 
 ## Requirements coverage
 

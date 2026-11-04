@@ -183,6 +183,31 @@ describe('TaskListPage', () => {
     expect(vi.mocked(deleteTask).mock.calls[0][0]).toBe(2)
   })
 
+  it('lifts a card above the next one while its menu is open', async () => {
+    const user = userEvent.setup()
+    await renderPage()
+
+    const item = card('Unassigned task').closest('li') as HTMLElement
+    expect(item.className).toContain('has-[[aria-expanded=true]]:z-30')
+    await user.click(screen.getByRole('button', { name: 'Assignee of Unassigned task: Unassigned' }))
+    expect(item.querySelector('[aria-expanded="true"]')).not.toBeNull()
+  })
+
+  it('picks a due date from the calendar and shows it day first', async () => {
+    const user = userEvent.setup()
+    vi.mocked(getTasks).mockResolvedValue([
+      makeTask(1, 'Dated task', { dueDate: '2030-03-04' }),
+    ])
+    await renderPage()
+
+    expect(card('Dated task')).toHaveTextContent('4 Mar 2030')
+    await user.click(screen.getByRole('button', { name: 'Due date of Dated task: 04/03/2030' }))
+    const calendar = screen.getByRole('dialog', { name: 'Due date of Dated task' })
+    await user.click(within(calendar).getByRole('button', { name: /10 March 2030/ }))
+
+    expect(updateTask).toHaveBeenCalledWith(1, { dueDate: '2030-03-10' })
+  })
+
   it('edits a task and only sends what changed', async () => {
     const user = userEvent.setup()
     await renderPage()
